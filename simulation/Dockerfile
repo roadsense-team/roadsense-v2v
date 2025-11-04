@@ -33,12 +33,11 @@ RUN tar xvfz omnetpp-6.2.0-linux-x86_64.tgz
 
 # Set up environment variables for OMNeT++
 WORKDIR /root/omnetpp-6.2.0
-RUN chmod +x setenv && . ./setenv
 ENV PATH="/root/omnetpp-6.2.0/bin:$PATH"
 
 # Configure and build OMNeT++
-RUN ./configure
-RUN make
+RUN bash -c "chmod +x setenv && . ./setenv && python3 -m venv .venv && . .venv/bin/activate && python3 -m pip install -r python/requirements.txt && ./configure"
+RUN bash -c ". ./setenv && make"
 
 # Verify OMNeT++ installation
 RUN omnetpp -v
@@ -49,7 +48,7 @@ RUN mkdir v2v-workspace
 WORKDIR /root/v2v-workspace
 
 # Download and extract SUMO
-RUN wget https://sumo.dlr.de/releases/1.22.0/sumo-src-1.22.0.tar.gz
+RUN wget https://sumo.dlr.de/releases/1.22.0/sumo-src-1.22.0.0.tar.gz
 RUN tar xzf sumo-src-1.22.0.tar.gz
 
 # Install SUMO dependencies
