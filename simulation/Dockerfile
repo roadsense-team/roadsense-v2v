@@ -48,7 +48,7 @@ RUN mkdir v2v-workspace
 WORKDIR /root/v2v-workspace
 
 # Download and extract SUMO
-RUN wget https://sumo.dlr.de/releases/1.22.0/sumo-src-1.22.0.0.tar.gz
+RUN wget https://sumo.dlr.de/releases/1.22.0/sumo-src-1.22.0.tar.gz
 RUN tar xzf sumo-src-1.22.0.tar.gz
 
 # Install SUMO dependencies
