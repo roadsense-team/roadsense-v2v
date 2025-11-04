@@ -12,7 +12,7 @@ RUN apt-get update && apt-get upgrade -y
 # Install core development tools for OMNeT++
 RUN apt-get install -y make diffutils pkg-config ccache clang lld gdb lldb \
     bison flex perl sed gawk python3 python3-pip python3-venv python3-dev \
-    libxml2-dev zlib1g-dev doxygen graphviz xdg-utils libdw-dev
+    libxml2-dev zlib1g-dev doxygen graphviz xdg-utils libdw-dev wget
 
 # Install GUI support for OMNeT++ (Qtenv and IDE)
 RUN apt-get install -y qt6-base-dev qt6-base-dev-tools qmake6 libqt6svg6 \
