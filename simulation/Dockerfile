@@ -33,7 +33,7 @@ RUN tar xvfz omnetpp-6.2.0-linux-x86_64.tgz
 
 # Set up environment variables for OMNeT++
 WORKDIR /root/omnetpp-6.2.0
-RUN . setenv
+RUN chmod +x setenv && . ./setenv
 ENV PATH="/root/omnetpp-6.2.0/bin:$PATH"
 
 # Configure and build OMNeT++
