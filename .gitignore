@@ -1,0 +1,36 @@
+# Hardware build artifacts
+hardware/.pio/
+hardware/lib/
+*.bin
+*.elf
+
+# Simulation results (large files)
+simulation/results/*.vec
+simulation/results/*.sca
+simulation/results/*.vci
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.env
+
+# ML models (track only .h files)
+ml/models/*.h5
+ml/models/*.pb
+ml/data/raw/
+ml/data/processed/
+
+# MCP secrets
+mcp/.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
