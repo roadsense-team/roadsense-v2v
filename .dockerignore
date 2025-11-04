@@ -1,0 +1,11 @@
+.git
+.gitignore
+.dockerignore
+
+# Project documentation not needed for build
+Project_Research_Preperation_Gemini/
+
+# Common build artifacts and dependency directories
+**/build
+**/target
+**/node_modules
