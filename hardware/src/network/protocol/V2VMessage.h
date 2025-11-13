@@ -5,7 +5,7 @@
  * CRITICAL: This message format is used by BOTH hardware and simulation.
  * The HIL bridge expects this exact struct layout.
  *
- * Total size: 85 bytes (well under 250-byte ESP-NOW limit)
+ * Total size: 90 bytes (well under 250-byte ESP-NOW limit)
  *
  * Standards compliance: Based on SAE J2735 Basic Safety Message (BSM)
  * Transport compatibility: ESP-NOW (hardware), UDP (simulation bridge)
@@ -28,11 +28,11 @@
  */
 struct V2VMessage {
     // ========================================================================
-    // HEADER (8 bytes)
+    // HEADER (13 bytes)
     // ========================================================================
-    uint8_t version;           // Protocol version (2)
-    char vehicleId[8];         // Vehicle identifier: "V001", "V002", "V003"
-    uint32_t timestamp;        // millis() or Unix timestamp
+    uint8_t version;           // Protocol version (2) - 1 byte
+    char vehicleId[8];         // Vehicle identifier: "V001", "V002", "V003" - 8 bytes
+    uint32_t timestamp;        // millis() or Unix timestamp - 4 bytes
 
     // ========================================================================
     // BSM PART I: CORE DATA SET (28 bytes)
@@ -140,12 +140,21 @@ struct V2VMessage {
 // COMPILE-TIME SIZE VERIFICATION
 // ============================================================================
 
-// Verify message fits in ESP-NOW payload limit
+// Verify exact message size (critical for simulation bridge compatibility)
+static_assert(sizeof(V2VMessage) == 90,
+              "V2VMessage size mismatch! Expected 90 bytes. Check struct packing.");
+
+// Verify message fits in ESP-NOW payload limit (250 bytes)
 static_assert(sizeof(V2VMessage) <= 250,
               "V2VMessage exceeds ESP-NOW 250-byte payload limit!");
 
-// Document actual size for debugging
-// Expected: 1 + 8 + 4 + 12 + 16 + 36 + 6 + 7 = 90 bytes
-// (May be 85 bytes depending on alignment)
+// Size breakdown with #pragma pack(1):
+// Header: 1 (version) + 8 (vehicleId) + 4 (timestamp) = 13 bytes
+// Position: 12 bytes (3 floats)
+// Dynamics: 16 bytes (4 floats)
+// Sensors: 36 bytes (9 floats)
+// Alert: 6 bytes (2 uint8_t + 1 float)
+// Mesh: 7 bytes (1 uint8_t + 6 uint8_t array)
+// TOTAL: 90 bytes (verified with pack(1), no padding)
 
 #endif // V2VMESSAGE_H

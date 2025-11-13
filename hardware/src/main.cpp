@@ -48,20 +48,31 @@ void setup() {
     logger.begin(SERIAL_BAUD_RATE);
     logger.info("MAIN", "========================================");
     logger.info("MAIN", "  RoadSense V2V System - Phase 1      ");
-    logger.info("MAIN", "  Vehicle ID: " + String(VEHICLE_ID));
     logger.info("MAIN", "========================================");
+    logger.info("MAIN", "");
+
+    // CRITICAL: Vehicle ID warning (prevent duplicate IDs in multi-unit testing)
+    logger.warning("MAIN", "========================================");
+    logger.warning("MAIN", "  VEHICLE ID: " + String(VEHICLE_ID));
+    logger.warning("MAIN", "  !!! ENSURE EACH UNIT HAS UNIQUE ID !!!");
+    logger.warning("MAIN", "  Edit config.h before flashing!");
+    logger.warning("MAIN", "========================================");
+    logger.info("MAIN", "");
 
     // Initialize status LED
     pinMode(LED_STATUS_PIN, OUTPUT);
     digitalWrite(LED_STATUS_PIN, LOW);
     logger.info("MAIN", "Status LED initialized (GPIO " + String(LED_STATUS_PIN) + ")");
 
-    // Test V2VMessage size
+    // Test V2VMessage size (critical for HIL bridge compatibility)
     logger.info("MAIN", "V2VMessage size: " + String(sizeof(V2VMessage)) + " bytes");
-    if (sizeof(V2VMessage) <= 250) {
+    if (sizeof(V2VMessage) == 90) {
+        logger.info("MAIN", "✓ V2VMessage size correct (90 bytes)");
         logger.info("MAIN", "✓ V2VMessage fits in ESP-NOW payload limit (250 bytes)");
     } else {
-        logger.error("MAIN", "✗ V2VMessage exceeds ESP-NOW limit!");
+        logger.error("MAIN", "✗ UNEXPECTED SIZE! Expected 90 bytes, got " +
+                     String(sizeof(V2VMessage)));
+        logger.error("MAIN", "✗ Check #pragma pack(1) and struct alignment!");
     }
 
     // Test VehicleState
