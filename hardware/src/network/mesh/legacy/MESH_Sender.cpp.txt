@@ -1,0 +1,351 @@
+  /*
+GPS               : (32.0853, 34.7818, 15.4m)
+Accel             : (0.01g, 0.02g, 0.99g)
+timestamp         : 127530 ms
+sourceMAC         : AA: BB: CC: DD: EE: FF
+lastForwardingNode: 11: 22: 33: 44: 55: 66
+messageType       : 0 (ORIGINAL)
+hopCount          : 0
+isRealSensorData  : true
+angle             : 85°
+speed             : 4 km/h
+
+41 42 43 44 ...    // bytes representing latitude/longitude/altitude
+00 10              // accel x
+00 20              // accel y
+3F FF              // accel z
+00 01 F3 2A        // timestamp
+AA BB CC DD EE FF  // source MAC
+11 22 33 44 55 66  // last forwarding node
+   00              // messageType
+   00              // hopCount
+   01              // isRealSensorData
+00 00 00 55        // angle
+00 14              // speed
+*/
+
+#include "MESH_Sender.h"
+#include "../../config/MESH_config.h"
+#include "../../Services/MockData/GPS_mock_generator_service.h"
+#include "../../Services/MockData/ACC_mock_generator_service.h"
+#include <Arduino.h>
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_wifi.h> 
+  // Module name for logging
+const String MODULE_NAME = "MESH_Sender";
+  // Initialize static instance
+MESH_Sender* MESH_Sender::instance = nullptr;
+  // Static default console
+IConsoleMiddleware* MESH_Sender::defaultConsole = nullptr;
+  // Managers diclation 
+extern PackageManager* packageManager;
+extern PeerManager* peerManager;
+
+  // Constructor NOT IN THE USE RIGHT NOW
+MESH_Sender::MESH_Sender(MESH_Config& meshConfig, IConsoleMiddleware* consoleMiddleware) 
+    : meshConfig(meshConfig), initialized(false), console(consoleMiddleware) {
+        instance = this;
+}
+  // Constructor USING Managers
+MESH_Sender::MESH_Sender(MESH_Config& meshConfig,IConsoleMiddleware* consoleMiddleware,IDelayMiddleware* IdelayMiddleware,
+                        PackageManager* pkgManager,
+                        PeerManager* peerManager)
+    : meshConfig(meshConfig), initialized(false), console(consoleMiddleware) {
+    instance = this;
+    if (console == nullptr) {
+        console = defaultConsole;
+    }
+    if (pkgManager == nullptr) {
+        packageManager = new PackageManager(console);
+    } else {
+        packageManager = pkgManager;
+    }
+    if (peerManager == nullptr) {
+        peerManager = new PeerManager(console);
+    } else {
+        peerManager = peerManager;
+    }
+    dealayMiddleware = IdelayMiddleware;
+}
+  // Destructor
+MESH_Sender::~MESH_Sender() {
+    delete dataGenerator;
+    if (ownGenerators) {
+        delete gpsGenerator;
+        delete accelGenerator;
+    }
+      // Clear static reference if it points to this instance
+    if (instance == this) {
+        instance = nullptr;
+    }
+}
+  
+// Set default console for the class (to be used when not explicitly provided)
+void MESH_Sender::setDefaultConsole(IConsoleMiddleware* consoleMiddleware) {
+    defaultConsole = consoleMiddleware;
+}
+  
+// Initialize the mesh network
+bool MESH_Sender::begin() {
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    
+        // Set the WiFi channel to match MESH configuration
+        // Ensure MESH_CHANNEL is defined in MESH_config.h
+    esp_wifi_set_channel(MESH_CHANNEL, WIFI_SECOND_CHAN_NONE);
+    
+      // Initialize ESP-NOW
+    if (esp_now_init() != ESP_OK) {
+        return false;
+    }
+        
+      // Register callback for sent data
+    esp_now_register_send_cb([](const uint8_t *mac_addr, esp_now_send_status_t status) {
+        if (instance) {
+            instance->onDataSent(mac_addr, status);
+        }
+    });
+    
+      // Define broadcast address and register broadcast peer
+      // have to use the same MAC address length as in the MESH_Config class
+    uint8_t broadcastAddress[meshConfig.getMacAddressLength()] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    esp_now_peer_info_t peerInfo;
+    memset(&peerInfo, 0, sizeof(peerInfo));
+    memcpy(peerInfo.peer_addr, broadcastAddress, meshConfig.getMacAddressLength());
+    peerInfo.channel = MESH_CHANNEL;  // Explicitly use the MESH_CHANNEL
+    peerInfo.encrypt = false;
+    
+      // Add broadcast peer
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        return false;
+    }
+    if (console) {
+        String macAddress = WiFi.macAddress();
+    }
+    
+    initialized = true;
+    return true;
+}
+  
+// Send data through the mesh
+bool MESH_Sender::sendData(const Data& data) {
+    if (!initialized) {
+        return false;
+    }
+      // Create a copy that we can modify
+    Data dataToSend = data;
+    
+        // if this is our own original message, set our MAC as the source
+    if (data.messageType == meshConfig.getMessageTypeOriginal() && data.hopCount == 0) {
+          // This is our own original message, set our MAC as the source
+        uint8_t macAddress[meshConfig.getMacAddressLength()];
+        WiFi.macAddress(macAddress);
+        dataToSend.setSourceMAC(macAddress);  // Set our own MAC
+        
+          // These should already be set but set them explicitly for clarity
+        dataToSend.messageType = meshConfig.getMessageTypeOriginal();
+        dataToSend.hopCount    = 0;
+    }
+    if (console) {
+        
+          // Log GPS data
+        String gpsLog = "GPS: " +
+                       String(dataToSend.gps.latitude, 6) + ", " + 
+                       String(dataToSend.gps.longitude, 6) + ", " + 
+                       String(dataToSend.gps.altitude, 2) + " m";        
+          // Log accelerometer data
+        String accelLog = "Accel: " +
+                         String(dataToSend.accel.x, 2) + "g, " + 
+                         String(dataToSend.accel.y, 2) + "g, " + 
+                         String(dataToSend.accel.z, 2) + "g";
+    }
+    
+      // Actually send the data using ESP-NOW
+      /*
+      [ WiFi MAC Header     | ESP-NOW Header    | Data Payload (Data struct) ]
+        6 bytes             |  1 byte           |  sizeof(Data) bytes
+        ------------------- |-------------------|----------------------
+        WiFi MAC Header:
+        src:  AA:BB:CC:DD:EE:FF
+        dest: FF:FF:FF:FF:FF:FF  (broadcast)
+
+        ESP-NOW Header:
+        seq: 42
+        control: 0x01
+
+        Payload (Data struct):
+        GPS: (32.0853, 34.7818, 15.4m)
+        Accel: (0.01g, 0.02g, 0.99g)
+        timestamp: 127530 ms
+        sourceMAC: AA:BB:CC:DD:EE:FF
+        lastForwardingNode: 11:22:33:44:55:66
+        messageType: 0 (ORIGINAL)
+        hopCount: 0
+        isRealSensorData: true
+        angle: 85
+        speed: 4
+
+      */
+
+    // if the result is not OK, return false
+    // and if the result is OK, return true
+    // the err is object from esp_err.h libery that is inside the esp_now.h library
+    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t*)&dataToSend, sizeof(Data));
+    
+    if (result != ESP_OK) {
+        return false;
+    }    
+    return true;
+}
+  
+// Generate and send data in one step
+bool MESH_Sender::generateAndSendData() {
+    Data data = dataGenerator->generateData();
+    return sendData(data);
+}
+  // Get the data generator
+DataGenerator* MESH_Sender::getDataGenerator() const {
+    return dataGenerator;
+}
+
+  // Static callback for sent data
+void MESH_Sender::sentCallback(const uint8_t *mac_addr, esp_err_t status) {
+    if (instance) {
+        instance->onDataSent(mac_addr, status);
+    }
+}
+
+  // Handle sent data callback 
+void MESH_Sender::onDataSent(const uint8_t* mac_addr, esp_err_t status) {
+
+    if (console) {
+        String macStr = MACHelper::macToString(mac_addr);
+     }
+}
+  // BROADCAST MAC address
+void MESH_Sender::broadcastAllStoredPackages() {
+    
+      // Get all packages from the package manager
+    const auto& allPackages = packageManager->getAllPackages();
+    int   broadcastCount    = 0;
+      // Get our own MAC address
+    uint8_t ownMac[meshConfig.getMacAddressLength()];
+    WiFi.macAddress(ownMac);
+    String ownMacStr = MACHelper::macToString(ownMac);
+    
+    for (const auto& macPair : allPackages) {
+        const String& macStr = macPair.first;
+        const auto& packages = macPair.second;
+        
+          // Skip empty vectors
+        if (packages.empty()) continue;
+        
+          // Get all packages from each MAC address
+        for (const PackageData& package : packages) {
+              // Create a copy that we can modify for broadcasting
+            Data dataToSend = package.data;
+            
+              // Set our MAC as the forwarding node but preserve original source
+            memcpy(dataToSend.lastForwardingNode, ownMac, meshConfig.getMacAddressLength());
+            
+              // Only increment hop count if we're not the original source
+            if (!MACHelper::compareMACAddresses(dataToSend.sourceMAC, ownMac)) {
+                dataToSend.hopCount    = package.hopCount + 1;
+                dataToSend.messageType = meshConfig.getMessageTypeRetransmission();
+                
+                  // Don't exceed max hop count
+                if (dataToSend.hopCount > meshConfig.getMaxHopCount()) {
+                    continue;
+                }
+            }
+            
+            
+              // Send data through mesh
+            if (sendData(dataToSend)) {
+                broadcastCount++;
+                  // Small delay to avoid flooding the network
+                dealayMiddleware->delay(meshConfig.getDefaultDelay());
+            }
+        }
+    }
+}
+
+// forward stored packages
+void MESH_Sender::forwardStoredPackages(int lastNodeJoinTime){
+        // Get our own MAC address
+        uint8_t ownMac[meshConfig.getMacAddressLength()];
+        // we need to get the MAC address of the ESP32
+        WiFi.macAddress(ownMac);
+        // convert it to string for easier comparison
+        String ownMacStr = MACHelper::macToString(ownMac);
+        
+        // Keep track of last forwarded messages to avoid duplicates
+        static std::map<String, unsigned long> lastForwardedMessages;
+        // Current time for timeout checks
+        unsigned long currentTime = millis();
+        // Check if there's a recent new node join
+        bool     hasRecentNewNode = (currentTime - lastNodeJoinTime < 10000);  // Within 10 seconds of new node
+        // Get all packages from the package manager
+        const auto& allPackages = packageManager->getAllPackages();
+        // Keep track of forwarded messages
+        int   forwardedCount    = 0;
+        
+            // Clean up old entries in lastForwardedMessages
+        for (auto it = lastForwardedMessages.begin(); it != lastForwardedMessages.end();) {
+            // Remove entries older than the package timeout
+            if (currentTime - it->second > meshConfig.getPackageTimeout()) {
+                // Erase old entry
+                it = lastForwardedMessages.erase(it);
+            } else {
+                // Move to next entry
+                ++it;
+            }
+        }
+        // Iterate over all packages
+        for (const auto& macPair : allPackages) {
+            // Get MAC address and associated packages
+            const String& macStr = macPair.first;
+            // Get the vector of packages for this MAC
+            const auto& packages = macPair.second;
+            
+              // Skip our own packages
+            if (macStr == ownMacStr) {
+                continue;
+            }
+            
+            if (!packages.empty()) {
+                // Get the latest package
+                const PackageData& latestPackage = packages.back();
+                
+                // Create a unique message ID based on source MAC and timestamp
+                String messageId = macStr + "_" + String(latestPackage.data.timestamp);
+                
+                // Check if we have forwarded this message recently
+                // or if there's a recent new node join
+                if ((lastForwardedMessages.find(messageId) == lastForwardedMessages.end() || hasRecentNewNode) && 
+                        // Ensure we don't exceed max hop count
+                     latestPackage.hopCount < meshConfig.getMaxHopCount()) {
+                        // Prepare data for forwarding
+                    Data dataToForward = latestPackage.data;
+                    
+                        // Increment hop count and set message type to retransmission
+                    dataToForward.hopCount++;
+                        // Set message type to retransmission
+                    dataToForward.messageType = meshConfig.getMessageTypeRetransmission();
+                        // Set our MAC as the last forwarding node
+                    memcpy(dataToForward.lastForwardingNode, ownMac,meshConfig.getMacAddressLength());
+                        // Send the data
+                    bool sent = sendData(dataToForward);
+                    
+                        // If sent successfully, record the time
+                    if (sent) {
+                        // Record the time we forwarded this message
+                        lastForwardedMessages[messageId] = currentTime;
+                        forwardedCount++;
+                    }
+                }
+            }
+        }
+    
+}

@@ -1,0 +1,349 @@
+#include "PackageManager.h"
+
+IConsoleMiddleware* PackageManager::defaultConsole = nullptr;
+
+PackageManager::PackageManager(IConsoleMiddleware* consoleMiddleware)
+    : console(consoleMiddleware) {
+    
+    if (console == nullptr) {
+        console = defaultConsole;
+    }
+}
+// Retrieve all packages for a specific MAC address
+// for analysis or processing 
+void PackageManager::processAllPendingPackages() {
+    // Get all unprocessed packages
+    auto unprocessedPackages = getAllUnprocessedPackages();
+    
+    if (unprocessedPackages.empty()) {
+        // No packages to process
+        return;
+    }    
+    // Process each unprocessed package
+    for (const auto& package : unprocessedPackages) {
+        // package is a pair of MAC string and PackageData
+        const String& macStr = package.first;
+        // Get the PackageData
+        const PackageData& packageData = package.second;
+
+        // Call the processing callback if it exists
+        if (onProcessPackage) {
+            // Call the user-defined callback
+            onProcessPackage(macStr, packageData);
+        }
+        
+        // Convert the MAC string back to a uint8_t array for the markProcessed method
+        uint8_t mac[MAC_ADDRESS_LENGTH];
+        if (sscanf(macStr.c_str(), "%2hhx:%2hhx:%2hhx:%2hhx:%2hhx:%2hhx", 
+               &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == MAC_ADDRESS_LENGTH) {
+            // Mark the package as processed
+            markProcessed(mac);
+        } 
+    }
+}
+
+// Set the default console for all instances
+void PackageManager::setDefaultConsole(IConsoleMiddleware* consoleMiddleware) {
+    defaultConsole = consoleMiddleware;
+}
+
+// add a new package
+void PackageManager::addPackage(const uint8_t* macAddress, const Data& data, uint8_t hopCount) {
+    // Create string key from the ORIGINAL SOURCE MAC address (not the immediate sender)
+    String sourceMacKey = MACHelper::macToString(data.sourceMAC);
+    String senderMacKey = MACHelper::macToString(macAddress);
+
+    // Get the current time
+    unsigned long currentTime = millis();
+    
+    // Create a new PackageData entry
+    PackageData newPackage;
+    newPackage.data = data;
+    newPackage.receivedTime = currentTime;
+    newPackage.hopCount = hopCount;
+    newPackage.processed = false;
+    
+    // Retrieve the vector of PackageData for the given SOURCE MAC address
+    auto& packageVector = packages[sourceMacKey];
+    
+    // Check if we already have a package with this exact timestamp from this source MAC
+    bool isDuplicate = false;
+    // Check for duplicates based on timestamp
+    for (const auto& pkg : packageVector) {
+        if (pkg.data.timestamp == data.timestamp) {
+            isDuplicate = true;
+            break;
+        }
+    }
+    
+    if (isDuplicate) {
+        return;
+    }
+    
+    // Always add as a new package
+    packageVector.push_back(newPackage);
+    // Limit the number of packages per source MAC to prevent memory issues
+    const int MAX_PACKAGES_PER_MAC = MAX_HOP_COUNT;
+    if (packageVector.size() > MAX_PACKAGES_PER_MAC) {
+        packageVector.erase(packageVector.begin());
+    }
+}
+
+PackageData* PackageManager::getLatestPackage(const uint8_t* macAddress) {
+    String macKey = MACHelper::macToString(macAddress);    
+    // Check if we have any packages for this MAC
+    if (packages.find(macKey) == packages.end() || packages[macKey].empty()) {
+        return nullptr;
+    }                                                                                                                                                                                                                           
+        
+    // Return pointer to the most recent package (last in vector)
+    return &packages[macKey].back();
+}
+
+const std::map<String, std::vector<PackageData>>& PackageManager::getAllPackages() const {    
+    return packages;
+}
+
+// Helper to count unprocessed packages in a vector
+void PackageManager::cleanupOldPackages(unsigned long maxAge) {
+    // Current time for age comparison
+    unsigned long currentTime = millis();
+    // Debugging information
+    int totalRemoved = 0;
+    int macsRemoved = 0;
+    
+    // Iterate over all MACs and their package vectors
+    for (auto& macPackages : packages) {
+        // macPackages is a pair of MAC string and vector of PackageData
+        const String& macKey = macPackages.first;
+        // Reference to the vector of packages
+        auto& packageVector = macPackages.second;
+        // Keep track of how many we start with
+        size_t initialSize = packageVector.size();        
+        // Remove packages older than maxAge
+        packageVector.erase(
+            // Lambda to identify old packages
+            // this lambda is build in C++11 standard
+            std::remove_if(
+                // Lambda function to check age
+                packageVector.begin(), 
+                // End iterator
+                packageVector.end(),
+                // Capture currentTime and maxAge by value, this pointer by reference
+                [currentTime, maxAge, this](const PackageData& pkg) {
+                    // Determine if this package is too old
+                    bool shouldRemove = (currentTime - pkg.receivedTime) > maxAge;
+                    // Log removal if console is available
+                    return shouldRemove;
+                }
+            ),
+            // End iterator
+            packageVector.end()
+        );
+        
+        size_t removedCount = initialSize - packageVector.size();
+        totalRemoved += removedCount;
+    }
+    
+    // Remove any MACs that now have no packages
+    for (auto it = packages.begin(); it != packages.end(); ) {
+        if (it->second.empty()) {
+            it = packages.erase(it);
+            macsRemoved++;
+        } else {
+            ++it;
+        }
+    }
+}
+
+void PackageManager::markProcessed(const uint8_t* macAddress) {
+    String macKey = MACHelper::macToString(macAddress);
+    // Check if we have any packages for this MAC
+    if (packages.find(macKey) == packages.end() || packages[macKey].empty()) {
+        return;
+    }
+    // Mark the latest package as processed
+    packages[macKey].back().processed = true;
+}
+
+std::vector<PackageData> PackageManager::getUnprocessedPackages(const uint8_t* macAddress) {
+    String macKey = MACHelper::macToString(macAddress);
+    std::vector<PackageData> unprocessed;
+    // Check if we have any packages for this MAC
+    if (packages.find(macKey) == packages.end()) {
+        return unprocessed;
+    }
+    
+    // Collect unprocessed packages
+    for (const auto& pkg : packages[macKey]) {
+        if (!pkg.processed) {
+            unprocessed.push_back(pkg);
+        }
+    }
+        
+    return unprocessed;
+}
+
+std::vector<std::pair<String, PackageData>> PackageManager::getAllUnprocessedPackages() {
+    std::vector<std::pair<String, PackageData>> unprocessed;
+        
+    for (const auto& macPackages : packages) {
+        for (const auto& pkg : macPackages.second) {
+            if (!pkg.processed) {
+                unprocessed.push_back(std::make_pair(macPackages.first, pkg));
+            }
+        }
+    }    
+    return unprocessed;
+}
+
+void PackageManager::printPackageStats() {
+    if (console) {
+        console->info(MODULE_NAME, "Package Manager Statistics:");
+        console->info(MODULE_NAME, "----------------------------");
+        
+        for (const auto& macPackages : packages) {
+            int unprocessedCount = getUnprocessedCount(macPackages.second);
+            
+            console->info(MODULE_NAME, "MAC: " + macPackages.first +
+                         ", Packages: " + String(macPackages.second.size()) +
+                         ", Unprocessed: " + String(unprocessedCount));
+            
+            // Print latest data if available
+            if (!macPackages.second.empty()) {
+                const auto& latestPkg = macPackages.second.back();
+                
+                String gpsInfo = "Latest GPS: " +
+                                String(latestPkg.data.gps.latitude, 6) + ", " +
+                                String(latestPkg.data.gps.longitude, 6) +
+                                ", Age: " + String((millis() - latestPkg.receivedTime) / 1000) + " seconds";
+                
+                console->info(MODULE_NAME, "  " + gpsInfo);
+            }
+        }
+        
+        console->info(MODULE_NAME, "----------------------------");
+    }
+}
+
+int PackageManager::cleanupWithActiveList(const std::set<String>& activeMacs, unsigned long maxAge) {
+    unsigned long currentTime = millis();
+    int removedPackages = 0;
+    // Iterate through all packages
+    for (auto it = packages.begin(); it != packages.end(); ) {
+        const String& macKey = it->first;
+        auto& packageVector = it->second;
+        
+        // Check if this MAC is in the active list
+        bool isActive = (activeMacs.find(macKey) != activeMacs.end());
+        
+        if (!isActive) {
+            // If peer is inactive, remove all packages for this MAC            
+            removedPackages += packageVector.size();
+            it = packages.erase(it);
+        } else {
+            // For active peers, remove only old packages
+            size_t oldSize = packageVector.size();
+            // Remove packages older than maxAge
+            packageVector.erase(
+                std::remove_if(
+                    packageVector.begin(), 
+                    packageVector.end(),
+                    [currentTime, maxAge, this, &macKey](const PackageData& pkg) {
+                        bool shouldRemove = (currentTime - pkg.receivedTime) > maxAge;
+                        if (shouldRemove && console) {
+                            console->debug(MODULE_NAME, "Removing old package for " + macKey + 
+                                          " (age: " + String((currentTime - pkg.receivedTime) / 1000) + " seconds)");
+                        }
+                        return shouldRemove;
+                    }
+                ),
+                packageVector.end()
+            );
+            
+            size_t removed = oldSize - packageVector.size();
+            removedPackages += removed;            
+            // Move to next MAC
+            ++it;
+        }
+    }
+        
+    return removedPackages;
+}
+
+void PackageManager::addLocalPackage(const Data& data) {
+    // Get local MAC address
+    uint8_t mac[MAC_ADDRESS_LENGTH];
+    WiFi.macAddress(mac);
+    
+    addPackage(mac, data, 0);
+}
+
+int PackageManager::getUnprocessedCount(const std::vector<PackageData>& pkgVector) {
+    int count = 0;
+    for (const auto& pkg : pkgVector) {
+        if (!pkg.processed) {
+            count++;
+        }
+    }
+    return count;
+}
+
+std::vector<PackageData> PackageManager::getAllPackagesForMAC(const uint8_t* macAddress) {
+    String macKey = MACHelper::macToString(macAddress);
+    std::vector<PackageData> result;    
+    // Check if we have any packages for this MAC
+    if (packages.find(macKey) != packages.end()) {
+        result = packages[macKey];
+        
+    } else {
+    }
+    return result;
+}
+
+void PackageManager::resetProcessedStatus(unsigned long maxAge) {
+    int resetCount = 0;
+    unsigned long currentTime = millis();
+    
+    if (console) {
+        console->debug(MODULE_NAME, "Resetting processed status for packages less than " + 
+                      String(maxAge/1000) + " seconds old");
+    }
+    
+    // Iterate through all MAC addresses
+    for (auto& macPair : packages) {
+        // Iterate through all packages for this MAC
+        for (auto& pkg : macPair.second) {
+            // Check if the package is newer than maxAge
+            if (currentTime - pkg.receivedTime < maxAge) {
+                // Reset the processed flag
+                if (pkg.processed) {
+                    pkg.processed = false;
+                    resetCount++;
+                }
+            }
+        }
+    }
+    
+    if (console) {
+        if (resetCount > 0) {
+            console->info(MODULE_NAME, "Reset processed flag for " + String(resetCount) + " packages");
+        } else {
+            console->debug(MODULE_NAME, "No packages were reset (all too old or already unprocessed)");
+        }
+    }
+}
+
+std::map<String, std::vector<PackageData>> PackageManager::getMyDataPackages() {
+    std::map<String, std::vector<PackageData>> myDataPackages;   
+    // Get local MAC address
+    uint8_t mac[MAC_ADDRESS_LENGTH];
+    WiFi.macAddress(mac);
+    String localMacKey = MACHelper::macToString(mac);
+ 
+    // Check if we have any packages for this MAC
+    if (packages.find(localMacKey) != packages.end()) {
+        myDataPackages[localMacKey] = packages[localMacKey];
+    }
+    return myDataPackages;
+}

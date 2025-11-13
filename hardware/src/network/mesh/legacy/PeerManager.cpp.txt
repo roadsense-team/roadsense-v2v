@@ -1,0 +1,295 @@
+#include "PeerManager.h"
+#include <Arduino.h>
+#include <math.h>
+#include <WiFi.h>
+#include <set> 
+
+// Initialize static members
+IConsoleMiddleware* PeerManager::defaultConsole = nullptr;
+std::map<String, TrackedPeer> PeerManager::knownPeers;  // Define the static member variable
+
+
+PeerManager::PeerManager(IConsoleMiddleware* consoleMiddleware)
+    : console(consoleMiddleware) {
+    
+    // If no console was provided, use the default
+    if (console == nullptr) {
+        console = defaultConsole;
+    }
+}
+
+// Set the default console for all instances
+void PeerManager::setDefaultConsole(IConsoleMiddleware* consoleMiddleware) {
+    defaultConsole = consoleMiddleware;
+}
+
+void PeerManager::updatePeer(const uint8_t* macAddress, const Data& data, uint8_t hopCount) {
+    String macStr = MACHelper::macToString(macAddress);    
+    // Check if peer already exists
+    for (auto& peer : peers) {
+        // Use MACHelper for MAC comparison
+        // if macAddress matches peer.macAddress
+        if (MACHelper::compareMACAddresses(peer.macAddress, macAddress)) {
+            // Update existing peer
+            peer.lastSeen = millis();
+            peer.lastData = data;
+            peer.hopCount = hopCount;
+            peer.isActive = true;
+            return;
+        }
+    }
+    
+    // If we get here, it's a new peer
+    PeerInfo newPeer;
+    memcpy(newPeer.macAddress, macAddress, MAC_ADDRESS_LENGTH);
+    newPeer.lastSeen = millis();
+    newPeer.lastData = data;
+    newPeer.hopCount = hopCount;
+    newPeer.isActive = true;
+    newPeer.distance = 0;  // Will be updated if distance calculation is implemented
+    
+    peers.push_back(newPeer);
+}
+
+void PeerManager::cleanupInactivePeers() {
+    // Current time for timeout comparison
+    unsigned long currentTime = millis();
+    // Timeout threshold
+    unsigned long timeout = PEER_TIMEOUT;
+    int timeoutCount = 0;
+    int distanceCount = 0;
+    
+    // Iterate over all peers and mark inactive if timed out
+    for (auto& peer : peers) {
+        // Use MACHelper for MAC formatting
+        String macStr = MACHelper::macToString(peer.macAddress);
+        
+        // Check if this peer has timed out
+        if (currentTime - peer.lastSeen > timeout) {
+            // Mark peer as inactive
+            bool wasActive = peer.isActive;
+            // If it was active before, increment timeout count
+            peer.isActive = false;
+            // Debugging information
+            timeoutCount += wasActive ? 1 : 0;
+        }
+        // Optional: Check if peer is too far (if distance calculation is implemented)
+        if (peer.distance > MAX_PEER_DISTANCE && peer.isActive) {
+            peer.isActive = false;
+            distanceCount++;
+        }
+    }
+}
+
+PeerInfo* PeerManager::getPeer(const uint8_t* macAddress) {    
+    for (auto& peer : peers) {
+        // Use MACHelper for MAC comparison
+        if (MACHelper::compareMACAddresses(peer.macAddress, macAddress) && peer.isActive) {
+            return &peer;
+        }
+    }
+    return nullptr;
+}
+
+const std::vector<PeerInfo>& PeerManager::getActivePeers() {
+    return peers;
+}
+
+bool PeerManager::shouldForwardMessage(const uint8_t* macAddress, uint8_t hopCount) {
+    // Use MACHelper for MAC formatting
+    String macStr = MACHelper::macToString(macAddress);
+    
+    
+    if (hopCount >= MAX_HOP_COUNT) {
+        return false;  // Already reached max hop count
+    }
+    
+    // Check if this is a known peer
+    PeerInfo* peer = getPeer(macAddress);
+    if (peer == nullptr) {
+        return true;  // New peer, should forward to help establish connectivity
+    }
+    if (!peer->isActive) {
+        return false;  // Don't forward messages from inactive peers
+    }
+        
+    return true;
+}
+
+size_t PeerManager::getActivePeerCount() const {
+    size_t count = 0;
+    for (const auto& peer : peers) {
+        if (peer.isActive) {
+            count++;
+        }
+    }
+    return count;
+}
+
+void PeerManager::printPeerList() {
+    if (console) {
+        for (const auto& peer : peers) {
+            // Use MACHelper for MAC formatting
+            String macStr = MACHelper::macToString(peer.macAddress);
+            String peerInfo = "MAC: " + macStr + 
+                             ", Active: " + String(peer.isActive ? "Yes" : "No") +
+                             ", Hop Count: " + String(peer.hopCount) +
+                             ", Last Seen: " + String((millis() - peer.lastSeen) / 100) + " seconds ago";
+            
+            // console->info(MODULE_NAME, peerInfo);
+        }
+        // console->info(MODULE_NAME, "------------------");
+    }
+}
+
+float PeerManager::calculateDistance(const GPSData& gps1, const GPSData& gps2) {
+    // Haversine formula for calculating distance between two GPS points
+    // This gives distance in meters
+    
+    const float R = 6371e3; // Earth radius in meters
+    
+    float lat1 = gps1.latitude * PI / 180;
+    float lat2 = gps2.latitude * PI / 180;
+    float dLat = (gps2.latitude - gps1.latitude) * PI / 180;
+    float dLon = (gps2.longitude - gps1.longitude) * PI / 180;
+    
+    float a = sin(dLat/2) * sin(dLat/2) +
+              cos(lat1) * cos(lat2) *
+              sin(dLon/2) * sin(dLon/2);
+    float c = 2 * atan2(sqrt(a), sqrt(1-a));
+    float distance = R * c;
+        
+    return distance;
+}
+
+int PeerManager::getPeerCount() {
+    return peers.size();
+}
+
+bool PeerManager::checkForNewPeers(int lastNodeJoinTime) {
+    bool newPeerDetected = false;
+    const auto& activePeers = getActivePeers();
+    unsigned long currentTime = millis();
+    
+    // Create vector of current active peer MACs for lookup
+    std::vector<String> currentActiveMacs;
+    for (const auto& peer : activePeers) {
+        if (peer.isActive) {
+            String macStr = MACHelper::macToString(peer.macAddress);
+            currentActiveMacs.push_back(macStr);
+            
+            // Check if this is a new peer
+            if (knownPeers.find(macStr) == knownPeers.end()) {
+                // New peer found
+                knownPeers[macStr] = {true, currentTime};
+                newPeerDetected = true;
+                lastNodeJoinTime = currentTime;
+            } else {
+                // Update existing peer
+                knownPeers[macStr].wasPresent = true;
+                knownPeers[macStr].lastSeenTime = currentTime;
+            }
+        }
+    }
+    
+    // Clean up peers that disappeared
+    for (auto it = knownPeers.begin(); it != knownPeers.end();) {
+        bool stillActive = false;
+        
+        // Check if peer is in current active list
+        for (const auto& mac : currentActiveMacs) {
+            if (mac == it->first) {
+                stillActive = true;
+                break;
+            }
+        }
+        
+        if (!stillActive) {
+            // Peer not in active list anymore
+            if (it->second.wasPresent) {
+                it->second.wasPresent = false;
+            }
+            
+            // Remove if not seen for more than timeout period
+            if (currentTime - it->second.lastSeenTime > meshConfig.getPackageTimeout()) {
+                it = knownPeers.erase(it);
+            } else {
+                ++it;
+            }
+        } else {
+            ++it;
+        }
+    }
+    
+    return newPeerDetected;
+}
+
+int PeerManager::getDirectPeerCount() const {
+    int count = 0;
+    for (const auto& peer : peers) {
+        if (peer.isActive && peer.hopCount <= 1) {
+            count++;
+        }
+    }
+    return count;
+}
+
+int PeerManager::getIndirectPeerCount() const {
+    int count = 0;
+    for (const auto& peer : peers) {
+        if (peer.isActive && peer.hopCount > 1) {
+            count++;
+        }
+    }
+    return count;
+}
+
+int PeerManager::getTotalMessageCount() const {
+    // For simplicity, this returns total active peer count * 2
+    // as a rough estimate of messages exchanged
+    return getActivePeerCount() * 2;
+}
+
+int PeerManager::getNetworkDiameter() const {
+    int maxHopCount = 0;
+    for (const auto& peer : peers) {
+        if (peer.isActive && peer.hopCount > maxHopCount) {
+            maxHopCount = peer.hopCount;
+        }
+    }
+    return maxHopCount + 1; // +1 to include this node
+}
+
+std::vector<PeerConnection> PeerManager::getAllPeerConnections() const {
+    std::vector<PeerConnection> connections;
+    
+    // if (console) {
+    //     console->debug(MODULE_NAME, "Getting all peer connections");
+    // }
+    
+    unsigned long currentTime = millis();
+    
+    // Get our own MAC address
+    uint8_t ownMac[MAC_ADDRESS_LENGTH];
+    WiFi.macAddress(ownMac);
+    String ownMacStr = MACHelper::macToString(ownMac);
+    
+    // Create connections between our node and all active peers
+    for (const auto& peer : peers) {
+        if (!peer.isActive) continue; // Skip inactive peers
+        
+        String peerMacStr = MACHelper::macToString(peer.macAddress);
+        
+        // Create a connection from us to the peer
+        PeerConnection conn;
+        conn.fromMac = ownMacStr;
+        conn.toMac = peerMacStr;
+        conn.isDirectPeer = (peer.hopCount <= 1); // Direct peer if hop count is 0 or 1
+        conn.hopCount = peer.hopCount;
+        conn.lastSeenSeconds = (currentTime - peer.lastSeen) / 1000;
+        
+        connections.push_back(conn);
+    }
+        
+    return connections;
+}

@@ -1,0 +1,455 @@
+#include "Data.h"
+#include "../Factorys/GPSMockGeneratorFactory.h"
+#include "../Services/MockData/ACC_mock_generator_service.h"
+#include "../Interfaces/Helpers/MACHelper.h"
+#include <Arduino.h>
+#include <WiFi.h>
+
+  // Need to include these for implementation only, not in header
+#include "../Interfaces/RealData/IGPSSensor.h"
+#include "../Interfaces/RealData/IAccelerometerSensor.h"
+#include "../Services/RealData/NEO6M_GPS_Service.h"
+#include "../Services/RealData/MPU6050_Service.h"
+#include "../Services/RealData/BasicAngleService.h"
+#include "../Services/RealData/BasicSpeedService.h"
+
+  // Initialize static members
+IConsoleMiddleware* DataGenerator::defaultConsole = nullptr;
+
+  // Implementation of MAC address methods
+String Data::getSourceMACString() const {
+    return MACHelper::macToString(sourceMAC);
+}
+
+void Data::setSourceMAC(const uint8_t* mac) {
+      // Copy the provided MAC address into sourceMAC
+    memcpy(sourceMAC, mac, MAC_ADDRESS_LENGTH);
+}
+
+bool Data::isSameSource(const uint8_t* mac) const {
+      // Compare source MAC addresses
+    return MACHelper::compareMACAddresses(sourceMAC, mac);
+}
+
+bool Data::isSameSource(const Data& other) const {
+      // Compare source MAC addresses
+    return MACHelper::compareMACAddresses(sourceMAC, other.sourceMAC);
+}
+
+  // Implementation of toString method
+String Data::toString() const {
+      // Convert source MAC to string
+    String macStr = MACHelper::macToString(sourceMAC);
+      // Indicate if data is from real sensors or mock
+    String sensorType = isRealSensorData ? "REAL" : "MOCK";
+    
+      // default buffer size
+      // array size 200 should be enough
+    char buffer[DEFAULT_BUFFER_SIZE];
+    snprintf(buffer, sizeof(buffer), 
+             "GPS(%.6f, %.6f), ACC(%.2f, %.2f, %.2f), Angle: %lu°, Speed: %u km/h, MAC: %s, HopCount: %d, Sensor: %s", 
+             gps.latitude, gps.longitude, 
+             accel.x, accel.y, accel.z,
+             angle, speed,
+             macStr.c_str(),
+             hopCount,
+             sensorType.c_str());
+    return String(buffer);
+}
+
+  // Default constructor - defaults to AREA (the AREA IS FOR mock data) generator
+DataGenerator::DataGenerator(IConsoleMiddleware* consoleMiddleware) 
+    :  console(consoleMiddleware),
+      gpsRealSensor(nullptr),
+      accelerometerRealSensor(nullptr),
+      angleService(nullptr),
+      speedService(nullptr),
+      useRealSensors(false),
+      previousTimestamp(0) {
+    
+      // If no console provided, use default
+    if (this->console == nullptr) {
+        this->console = defaultConsole;
+    }
+    
+    gpsGenerator   = GPSMockGeneratorFactory::getGPSGenerator(GPSGeneratorType::AREA);
+    accelGenerator = new ACC_mock_generator_service();
+    angleService   = new BasicAngleService(console);
+    speedService   = new BasicSpeedService(console);
+    ownGenerators  = true;
+    
+      // Initialize previousGPS to zeros
+    previousGPS = {0.0, 0.0, 0.0};
+    
+      // if (console) {
+      //     console->debug(MODULE_NAME, "Created with default mock generators");
+      // }
+}
+
+  // Constructor with useRealSensors flag
+DataGenerator::DataGenerator(bool useRealSensors, IConsoleMiddleware* consoleMiddleware)
+    :  console(consoleMiddleware),
+      angleService(nullptr),
+      speedService(nullptr),
+      useRealSensors(useRealSensors),
+      previousTimestamp(0) {
+    
+      // If no console provided, use default
+    if (this->console == nullptr) {
+        this->console = defaultConsole;
+    }
+    
+      // Initialize common services
+    angleService = new BasicAngleService(console);
+    speedService = new BasicSpeedService(console);
+    
+      // Initialize previousGPS to zeros
+    previousGPS = {0.0, 0.0, 0.0};
+    
+    if (useRealSensors) {
+          // Create real sensor implementations
+        gpsRealSensor           = new NEO6M_GPS_Service();
+        accelerometerRealSensor = new MPU6050_Service();
+        
+          // Initialize the sensors
+        gpsRealSensor->begin();
+        accelerometerRealSensor->begin();
+        
+          // Set mock generators to nullptr
+        gpsGenerator   = nullptr;
+        accelGenerator = nullptr;
+        
+          // if (console) {
+          //     console->info(MODULE_NAME, "Created with real sensors");
+          // }
+    } else {
+          // Use mock generators
+        gpsGenerator   = GPSMockGeneratorFactory::getGPSGenerator(GPSGeneratorType::AREA);
+        accelGenerator = new ACC_mock_generator_service();
+        
+          // Set real sensors to nullptr
+        gpsRealSensor           = nullptr;
+        accelerometerRealSensor = nullptr;
+        
+          // if (console) {
+          //     console->info(MODULE_NAME, "Created with mock sensors");
+          // }
+    }
+    
+      // Initialize angle and speed services
+    angleService->begin();
+    speedService->begin();
+    
+    ownGenerators = true;
+}
+
+  // Overloaded constructor that selects a specific generator type
+DataGenerator::DataGenerator(GPSGeneratorType type, IConsoleMiddleware* consoleMiddleware) 
+    :  console(consoleMiddleware),
+      gpsRealSensor(nullptr),
+      accelerometerRealSensor(nullptr),
+      angleService(nullptr),
+      speedService(nullptr),
+      useRealSensors(false),
+      previousTimestamp(0) {
+    
+      // If no console provided, use default
+    if (this->console == nullptr) {
+        this->console = defaultConsole;
+    }
+    
+    gpsGenerator   = GPSMockGeneratorFactory::getGPSGenerator(type);
+    accelGenerator = new ACC_mock_generator_service();
+    angleService   = new BasicAngleService(console);
+    speedService   = new BasicSpeedService(console);
+    ownGenerators  = true;
+    
+      // Initialize previousGPS to zeros
+    previousGPS = {0.0, 0.0, 0.0};
+    
+      // Initialize angle and speed services
+    angleService->begin();
+    speedService->begin();
+    
+      // if (console) {
+      //     console->debug(MODULE_NAME, "Created with specific mock GPS generator type");
+      // }
+}
+
+  // Constructor for real sensors
+DataGenerator::DataGenerator(IGPSSensor* gpsSensor, IAccelerometerSensor* accelSensor,
+                             IConsoleMiddleware* consoleMiddleware)
+    :  gpsRealSensor(gpsSensor),
+      accelerometerRealSensor(accelSensor),
+      console(consoleMiddleware),
+      gpsGenerator(nullptr),
+      accelGenerator(nullptr),
+      angleService(nullptr),
+      speedService(nullptr),
+      ownGenerators(false),
+      useRealSensors(true),
+      previousTimestamp(0) {
+    
+      // If no console provided, use default
+    if (this->console == nullptr) {
+        this->console = defaultConsole;
+    }
+    
+      // Create and initialize angle and speed services
+    angleService = new BasicAngleService(console);
+    speedService = new BasicSpeedService(console);
+    angleService->begin();
+    speedService->begin();
+    
+      // Initialize previousGPS to zeros
+    previousGPS = {0.0, 0.0, 0.0};
+    
+      // if (console) {
+      //     console->debug(MODULE_NAME, "Created with external real sensors");
+      // }
+}
+
+  // Constructor that uses external mock generators
+DataGenerator::DataGenerator(IGPS_mock_generator_service* gpsGen, IACC_mock_generator_service* accelGen,
+                             IConsoleMiddleware* consoleMiddleware)
+    :  gpsGenerator(gpsGen),
+      accelGenerator(accelGen),
+      console(consoleMiddleware),
+      gpsRealSensor(nullptr),
+      accelerometerRealSensor(nullptr),
+      angleService(nullptr),
+      speedService(nullptr),
+      ownGenerators(false),
+      useRealSensors(false),
+      previousTimestamp(0) {
+    
+      // If no console provided, use default
+    if (this->console == nullptr) {
+        this->console = defaultConsole;
+    }
+    
+      // Create and initialize angle and speed services
+    angleService = new BasicAngleService(console);
+    speedService = new BasicSpeedService(console);
+    angleService->begin();
+    speedService->begin();
+    
+      // Initialize previousGPS to zeros
+    previousGPS = {0.0, 0.0, 0.0};
+    
+      // if (console) {
+      //     console->debug(MODULE_NAME, "Created with external mock generators");
+      // }
+}
+
+  // Set default console
+void DataGenerator::setDefaultConsole(IConsoleMiddleware* consoleMiddleware) {
+    defaultConsole = consoleMiddleware;
+    
+    if (defaultConsole) {
+          // defaultConsole->debug("DataGenerator", "Default console set for DataGenerator class");
+    }
+}
+
+  // Destructor
+DataGenerator::~DataGenerator() {
+    if (ownGenerators) {
+        if (gpsGenerator) {
+            delete gpsGenerator;
+            gpsGenerator = nullptr;
+        }
+        if (accelGenerator) {
+            delete accelGenerator;
+            accelGenerator = nullptr;
+        }
+        if (gpsRealSensor) {
+            delete gpsRealSensor;
+            gpsRealSensor = nullptr;
+        }
+        if (accelerometerRealSensor) {
+            delete accelerometerRealSensor;
+            accelerometerRealSensor = nullptr;
+        }
+    }
+    
+      // Always delete angle and speed services since we create them in all constructors
+    if (angleService) {
+        delete angleService;
+        angleService = nullptr;
+    }
+    
+    if (speedService) {
+        delete speedService;
+        speedService = nullptr;
+    }
+    
+      // if (console) {
+      //     console->debug(MODULE_NAME, "Destroyed");
+      // }
+}
+
+  // Method to change whether we use real sensors
+void DataGenerator::setUseRealSensors(bool useReal) {
+      // Only make changes if the value is different
+    if (useReal != useRealSensors) {
+        useRealSensors = useReal;
+        
+          // Clean up existing resources if we own them
+        if (ownGenerators) {
+            if (useRealSensors) {
+                  // Switch to real sensors
+                if (gpsGenerator) {
+                    delete gpsGenerator;
+                    gpsGenerator = nullptr;
+                }
+                if (accelGenerator) {
+                    delete accelGenerator;
+                    accelGenerator = nullptr;
+                }
+                
+                  // Create real sensor implementations if they don't exist
+                if (!gpsRealSensor) {
+                    gpsRealSensor = new NEO6M_GPS_Service();
+                    gpsRealSensor->begin();
+                }
+                if (!accelerometerRealSensor) {
+                    accelerometerRealSensor = new MPU6050_Service();
+                    accelerometerRealSensor->begin();
+                }
+                
+                  // if (console) {
+                  //     console->info(MODULE_NAME, "Switched to real sensors");
+                  // }
+            } else {
+                  // Switch to mock generators
+                if (gpsRealSensor) {
+                    delete gpsRealSensor;
+                    gpsRealSensor = nullptr;
+                }
+                if (accelerometerRealSensor) {
+                    delete accelerometerRealSensor;
+                    accelerometerRealSensor = nullptr;
+                }
+                
+                  // Create mock generators if they don't exist
+                if (!gpsGenerator) {
+                    gpsGenerator = GPSMockGeneratorFactory::getGPSGenerator(GPSGeneratorType::AREA);
+                }
+                if (!accelGenerator) {
+                    accelGenerator = new ACC_mock_generator_service();
+                }
+                
+                  // if (console) {
+                  //     console->info(MODULE_NAME, "Switched to mock generators");
+                  // }
+            }
+        } else if (console) {
+              // console->warning(MODULE_NAME, "Cannot change sensor type - using external generators");
+        }
+    }
+}
+
+  // Generate complete data packet using the appropriate sources
+Data DataGenerator::generateData() {
+      // Create a new Data object
+    Data data;
+      // Set timestamp and source MAC
+    data.timestamp = millis();
+    
+      // Get device MAC address
+    uint8_t mac[MAC_ADDRESS_LENGTH];
+      // Get the MAC address from the WiFi module
+    WiFi.macAddress(mac);
+      // Set the source MAC in the data
+    data.setSourceMAC(mac);
+    
+      // Initialize other fields
+    data.hopCount         = 0;
+    data.messageType      = 0;
+    data.isRealSensorData = useRealSensors;
+    
+      // Get data from appropriate sources
+    if (useRealSensors) {
+          // Real sensor data
+        if (gpsRealSensor && gpsRealSensor->isAvailable()) {
+            data.gps = gpsRealSensor->readGPSData();
+              // if (console) {
+              //     console->debug(MODULE_NAME, "Using real GPS data");
+              // }
+        } else {
+            data.gps = {0.0, 0.0, 0.0};
+              // if (console) {
+              //     console->warning(MODULE_NAME, "GPS sensor not available, using zeros");
+              // }
+        }
+        
+        if (accelerometerRealSensor && accelerometerRealSensor->isAvailable()) {
+            data.accel = accelerometerRealSensor->readAccelerometerData();
+              // if (console) {
+              //     console->debug(MODULE_NAME, "Using real accelerometer data");
+              // }
+        } else {
+            data.accel = {0.0, 0.0, 0.0};
+              // if (console) {
+              //     console->warning(MODULE_NAME, "Accelerometer sensor not available, using zeros");
+              // }
+        }
+    } else {
+          // Mock data
+        if (gpsGenerator) {
+            data.gps = gpsGenerator->generateGPSData();
+        } else {
+            data.gps = {0.0, 0.0, 0.0};
+        }
+        
+        if (accelGenerator) {
+            data.accel = accelGenerator->generateAccelerometerData();
+        } else {
+            data.accel = {0.0, 0.0, 0.0};
+        }
+        
+          // if (console) {
+          //     console->debug(MODULE_NAME, "Using mock sensor data");
+          // }
+    }
+    
+      // Calculate angle if we have valid GPS data and previous point
+    if (angleService && angleService->isAvailable() && 
+        !(previousGPS.latitude == 0 && previousGPS.longitude == 0) &&
+        !(data.gps.latitude == 0 && data.gps.longitude == 0)) {
+        
+        data.angle = angleService->calculateAngle(data.gps, previousGPS);
+          // if (console) {
+          //     console->debug(MODULE_NAME, "Calculated angle: " + String(data.angle) + "°");
+          // }
+    } else {
+        data.angle = 0;
+          // if (console && (data.gps.latitude != 0 || data.gps.longitude != 0)) {
+          //     console->debug(MODULE_NAME, "No previous GPS data for angle calculation, using 0");
+          // }
+    }
+    
+      // Calculate speed if we have valid GPS data, previous point, and time difference
+    if (speedService && speedService->isAvailable() && 
+        !(previousGPS.latitude == 0 && previousGPS.longitude == 0) &&
+        !(data.gps.latitude == 0 && data.gps.longitude == 0) &&
+        previousTimestamp > 0) {
+        
+        unsigned long timeDiff = data.timestamp - previousTimestamp;
+                 data.speed    = speedService->calculateSpeed(data.gps, previousGPS, timeDiff);
+          // if (console) {
+          //     console->debug(MODULE_NAME, "Calculated speed: " + String(data.speed) + " km/h");
+          // }
+    } else {
+        data.speed = 0;
+          // if (console && (data.gps.latitude != 0 || data.gps.longitude != 0)) {
+          //     console->debug(MODULE_NAME, "No previous GPS data for speed calculation, using 0");
+          // }
+    }
+    
+      // Update previous values for next calculation
+    previousGPS       = data.gps;
+    previousTimestamp = data.timestamp;
+    
+    return data;
+}

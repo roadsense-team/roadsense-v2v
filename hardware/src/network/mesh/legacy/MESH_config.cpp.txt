@@ -1,0 +1,225 @@
+#include "MESH_config.h"
+#include <Arduino.h>
+
+MESH_Config::MESH_Config() {
+}
+
+bool MESH_Config::configure() {
+    Serial.println("===== MESH CONFIGURATION =====");
+    
+      // Network configuration
+    Serial.println("\n--- Network Configuration ---");
+    Serial.print("SSID: ");
+    Serial.println(networkConfig.ssid);
+    Serial.print("Channel: ");
+    Serial.println(networkConfig.channel);
+    Serial.print("Max layer: ");
+    Serial.println(networkConfig.maxLayer);
+    Serial.print("Max connections: ");
+    Serial.println(networkConfig.maxConnections);
+    
+      // Interval configuration
+    Serial.println("\n--- Interval Configuration ---");
+    Serial.print("Send interval: ");
+    Serial.println(intervalConfig.sendInterval);
+    Serial.print("Cleanup interval: ");
+    Serial.println(intervalConfig.cleanupInterval);
+    Serial.print("Process interval: ");
+    Serial.println(intervalConfig.processInterval);
+    Serial.print("Mesh status interval: ");
+    Serial.println(intervalConfig.meshStatusInterval);
+    Serial.print("Network snapshot interval: ");
+    Serial.println(intervalConfig.networkSnapshotInterval);
+    Serial.print("Broadcast interval: ");
+    Serial.println(intervalConfig.broadcastInterval);
+    
+      // Delay configuration
+    Serial.println("\n--- Delay Configuration ---");
+    Serial.print("Default delay: ");
+    Serial.println(delayConfig.defaultDelay);
+    Serial.print("Short delay: ");
+    Serial.println(delayConfig.shortDelay);
+    Serial.print("Mid delay: ");
+    Serial.println(delayConfig.midDelay);
+    Serial.print("Long delay: ");
+    Serial.println(delayConfig.longDelay);
+    
+      // Timeout configuration
+    Serial.println("\n--- Timeout Configuration ---");
+    Serial.print("Peer timeout: ");
+    Serial.println(timeoutConfig.peerTimeout);
+    Serial.print("Package timeout: ");
+    Serial.println(timeoutConfig.packageTimeout);
+    Serial.print("GPS read timeout: ");
+    Serial.println(timeoutConfig.gpsReadTimeout);
+    Serial.print("GPS cache timeout: ");
+    Serial.println(timeoutConfig.gpsCacheTimeout);
+    Serial.print("Node join window: ");
+    Serial.println(timeoutConfig.nodeJoinWindow);
+    Serial.print("Max hop count: ");
+    Serial.println(timeoutConfig.maxHopCount);
+    
+      // Communication configuration
+    Serial.println("\n--- Communication Configuration ---");
+    Serial.print("Serial baud rate: ");
+    Serial.println(commConfig.serialBaudRate);
+    Serial.print("MAC address length: ");
+    Serial.println(commConfig.macAddressLength);
+    
+      // GPS configuration
+    Serial.println("\n--- GPS Configuration ---");
+    Serial.print("RX pin: ");
+    Serial.println(gpsConfig.rxPin);
+    Serial.print("TX pin: ");
+    Serial.println(gpsConfig.txPin);
+    Serial.print("Baud rate: ");
+    Serial.println(gpsConfig.baudRate);
+    Serial.print("Serial port: ");
+    Serial.println(gpsConfig.serialPort);
+    Serial.print("Short delay: ");
+    Serial.println(gpsConfig.shortDelay);
+    
+      // Accelerometer configuration
+    Serial.println("\n--- Accelerometer Configuration ---");
+    Serial.print("SDA pin: ");
+    Serial.println(accConfig.sdaPin);
+    Serial.print("SCL pin: ");
+    Serial.println(accConfig.sclPin);
+    Serial.print("Short delay: ");
+    Serial.println(accConfig.shortDelay);
+    
+      // Feature configuration
+    Serial.println("\n--- Feature Configuration ---");
+    Serial.print("Use real sensors: ");
+    Serial.println(featureConfig.useRealSensors ? "true" : "false");
+    Serial.print("Log to file: ");
+    Serial.println(featureConfig.logToFile ? "true" : "false");
+    Serial.print("Send individual updates: ");
+    Serial.println(featureConfig.sendIndividualUpdates ? "true" : "false");
+    Serial.print("Critical events bypass consolidation: ");
+    Serial.println(featureConfig.criticalEventsCanBypassConsolidation ? "true" : "false");
+    Serial.print("Default buffer size: ");
+    Serial.println(featureConfig.defaultBufferSize);
+    Serial.print("Package size: ");
+    Serial.println(featureConfig.packageSize);
+    Serial.print("Max peer distance: ");
+    Serial.println(featureConfig.maxPeerDistance);
+    
+    Serial.println("\n==============================");
+    
+    return true;
+}
+
+  // Network configuration getters/setters
+const char* MESH_Config::getMeshSSID() const { return networkConfig.ssid; }
+const char* MESH_Config::getMeshPassword() const { return networkConfig.password; }
+uint8_t MESH_Config::getMeshChannel() const { return networkConfig.channel; }
+uint8_t MESH_Config::getMaxLayer() const { return networkConfig.maxLayer; }
+uint8_t MESH_Config::getMaxConnections() const { return networkConfig.maxConnections; }
+
+void MESH_Config::setMeshSSID(const char* ssid) {
+    strncpy(networkConfig.ssid, ssid, sizeof(networkConfig.ssid) - 1);
+    networkConfig.ssid[sizeof(networkConfig.ssid) - 1] = '\0';
+}
+
+void MESH_Config::setMeshPassword(const char* password) {
+    strncpy(networkConfig.password, password, sizeof(networkConfig.password) - 1);
+    networkConfig.password[sizeof(networkConfig.password) - 1] = '\0';
+}
+
+void MESH_Config::setMeshChannel(uint8_t channel) { networkConfig.channel = channel; }
+void MESH_Config::setMaxLayer(uint8_t maxLayer) { networkConfig.maxLayer = maxLayer; }
+void MESH_Config::setMaxConnections(uint8_t maxConnections) { networkConfig.maxConnections = maxConnections; }
+
+  // Interval configuration getters/setters
+unsigned long MESH_Config::getSendInterval() const { return intervalConfig.sendInterval; }
+unsigned long MESH_Config::getCleanupInterval() const { return intervalConfig.cleanupInterval; }
+unsigned long MESH_Config::getProcessInterval() const { return intervalConfig.processInterval; }
+unsigned long MESH_Config::getMeshStatusInterval() const { return intervalConfig.meshStatusInterval; }
+unsigned long MESH_Config::getNetworkSnapshotInterval() const { return intervalConfig.networkSnapshotInterval; }
+unsigned long MESH_Config::getBroadcastInterval() const { return intervalConfig.broadcastInterval; }
+
+void MESH_Config::setSendInterval(unsigned long interval) { intervalConfig.sendInterval = interval; }
+void MESH_Config::setCleanupInterval(unsigned long interval) { intervalConfig.cleanupInterval = interval; }
+void MESH_Config::setProcessInterval(unsigned long interval) { intervalConfig.processInterval = interval; }
+void MESH_Config::setMeshStatusInterval(unsigned long interval) { intervalConfig.meshStatusInterval = interval; }
+void MESH_Config::setNetworkSnapshotInterval(unsigned long interval) { intervalConfig.networkSnapshotInterval = interval; }
+void MESH_Config::setBroadcastInterval(unsigned long interval) { intervalConfig.broadcastInterval = interval; }
+
+  // Delay configuration getters/setters
+unsigned long MESH_Config::getDefaultDelay() const { return delayConfig.defaultDelay; }
+unsigned long MESH_Config::getShortDelay() const { return delayConfig.shortDelay; }
+unsigned long MESH_Config::getMidDelay() const { return delayConfig.midDelay; }
+unsigned long MESH_Config::getLongDelay() const { return delayConfig.longDelay; }
+
+void MESH_Config::setDefaultDelay(unsigned long delay) { delayConfig.defaultDelay = delay; }
+void MESH_Config::setShortDelay(unsigned long delay) { delayConfig.shortDelay = delay; }
+void MESH_Config::setMidDelay(unsigned long delay) { delayConfig.midDelay = delay; }
+void MESH_Config::setLongDelay(unsigned long delay) { delayConfig.longDelay = delay; }
+
+  // Timeout configuration getters/setters
+unsigned long MESH_Config::getPeerTimeout() const { return timeoutConfig.peerTimeout; }
+unsigned long MESH_Config::getPackageTimeout() const { return timeoutConfig.packageTimeout; }
+unsigned long MESH_Config::getGpsReadTimeout() const { return timeoutConfig.gpsReadTimeout; }
+unsigned long MESH_Config::getGpsCacheTimeout() const { return timeoutConfig.gpsCacheTimeout; }
+unsigned long MESH_Config::getNodeJoinWindow() const { return timeoutConfig.nodeJoinWindow; }
+uint8_t MESH_Config::getMaxHopCount() const { return timeoutConfig.maxHopCount; }
+
+void MESH_Config::setPeerTimeout(unsigned long timeout) { timeoutConfig.peerTimeout = timeout; }
+void MESH_Config::setPackageTimeout(unsigned long timeout) { timeoutConfig.packageTimeout = timeout; }
+void MESH_Config::setGpsReadTimeout(unsigned long timeout) { timeoutConfig.gpsReadTimeout = timeout; }
+void MESH_Config::setGpsCacheTimeout(unsigned long timeout) { timeoutConfig.gpsCacheTimeout = timeout; }
+void MESH_Config::setNodeJoinWindow(unsigned long window) { timeoutConfig.nodeJoinWindow = window; }
+void MESH_Config::setMaxHopCount(uint8_t hopCount) { timeoutConfig.maxHopCount = hopCount; }
+
+  // GPS configuration getters/setters
+uint8_t MESH_Config::getGpsRxPin() const { return gpsConfig.rxPin; }
+uint8_t MESH_Config::getGpsTxPin() const { return gpsConfig.txPin; }
+unsigned long MESH_Config::getGpsBaudRate() const { return gpsConfig.baudRate; }
+uint8_t MESH_Config::getGpsSerialPort() const { return gpsConfig.serialPort; }
+unsigned long MESH_Config::getGpsShortDelay() const { return gpsConfig.shortDelay; }
+
+void MESH_Config::setGpsRxPin(uint8_t pin) { gpsConfig.rxPin = pin; }
+void MESH_Config::setGpsTxPin(uint8_t pin) { gpsConfig.txPin = pin; }
+void MESH_Config::setGpsBaudRate(unsigned long baudRate) { gpsConfig.baudRate = baudRate; }
+void MESH_Config::setGpsSerialPort(uint8_t port) { gpsConfig.serialPort = port; }
+void MESH_Config::setGpsShortDelay(unsigned long delay) { gpsConfig.shortDelay = delay; }
+
+  // Accelerometer configuration getters/setters
+uint8_t MESH_Config::getAccSdaPin() const { return accConfig.sdaPin; }
+uint8_t MESH_Config::getAccSclPin() const { return accConfig.sclPin; }
+unsigned long MESH_Config::getAccShortDelay() const { return accConfig.shortDelay; }
+
+void MESH_Config::setAccSdaPin(uint8_t pin) { accConfig.sdaPin = pin; }
+void MESH_Config::setAccSclPin(uint8_t pin) { accConfig.sclPin = pin; }
+void MESH_Config::setAccShortDelay(unsigned long delay) { accConfig.shortDelay = delay; }
+
+  // Communication configuration getters/setters
+unsigned long MESH_Config::getSerialBaudRate() const { return commConfig.serialBaudRate; }
+uint8_t MESH_Config::getMacAddressLength() const { return commConfig.macAddressLength; }
+uint8_t MESH_Config::getMessageTypeOriginal() const { return commConfig.messageTypeOriginal; }
+uint8_t MESH_Config::getMessageTypeRetransmission() const { return commConfig.messageTypeRetransmission; }
+uint8_t MESH_Config::getTelemetryDataType() const { return commConfig.telemetryDataType; }
+
+void MESH_Config::setSerialBaudRate(unsigned long baudRate) { commConfig.serialBaudRate = baudRate; }
+void MESH_Config::setMacAddressLength(uint8_t length) { commConfig.macAddressLength = length; }
+void MESH_Config::setMessageTypeOriginal(uint8_t type) { commConfig.messageTypeOriginal = type; }
+void MESH_Config::setMessageTypeRetransmission(uint8_t type) { commConfig.messageTypeRetransmission = type; }
+void MESH_Config::setTelemetryDataType(uint8_t type) { commConfig.telemetryDataType = type; }
+
+  // Feature configuration getters/setters
+bool MESH_Config::getUseRealSensors() const { return featureConfig.useRealSensors; }
+bool MESH_Config::getLogToFile() const { return featureConfig.logToFile; }
+bool MESH_Config::getSendIndividualUpdates() const { return featureConfig.sendIndividualUpdates; }
+bool MESH_Config::getCriticalEventsCanBypassConsolidation() const { return featureConfig.criticalEventsCanBypassConsolidation; }
+size_t MESH_Config::getDefaultBufferSize() const { return featureConfig.defaultBufferSize; }
+size_t MESH_Config::getPackageSize() const { return featureConfig.packageSize; }
+unsigned int MESH_Config::getMaxPeerDistance() const { return featureConfig.maxPeerDistance; }
+
+void MESH_Config::setUseRealSensors(bool use) { featureConfig.useRealSensors = use; }
+void MESH_Config::setLogToFile(bool log) { featureConfig.logToFile = log; }
+void MESH_Config::setSendIndividualUpdates(bool send) { featureConfig.sendIndividualUpdates = send; }
+void MESH_Config::setCriticalEventsCanBypassConsolidation(bool bypass) { featureConfig.criticalEventsCanBypassConsolidation = bypass; }
+void MESH_Config::setDefaultBufferSize(size_t size) { featureConfig.defaultBufferSize = size; }
+void MESH_Config::setPackageSize(size_t size) { featureConfig.packageSize = size; }
+void MESH_Config::setMaxPeerDistance(unsigned int distance) { featureConfig.maxPeerDistance = distance; }

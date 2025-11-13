@@ -1,0 +1,146 @@
+#include "MESH_Receiver.h"
+#include "../../Constants/MESH_Constants.h"
+#include <Arduino.h>
+#include <WiFi.h>
+#include <esp_now.h>
+#include "../../Interfaces/Wifi/ILayer2Sender.h"
+std::set<String> processedMessageIds;
+
+  // Initialize static members
+extern PackageManager* packageManager;
+extern PeerManager* peerManager;
+extern ILayer2Sender* layer2Sender;
+extern IMESH_sender_service* meshSender;
+
+MESH_Receiver*      MESH_Receiver::instance       = nullptr;
+IConsoleMiddleware* MESH_Receiver::defaultConsole = nullptr;
+
+MESH_Receiver::MESH_Receiver(MESH_Config& meshConfig, 
+    PackageManager* pkgManager,
+    PeerManager* peerMgr,
+    ILayer2Sender* l2Sender,
+    IMESH_sender_service* meshSenderService,
+    IConsoleMiddleware* consoleMiddleware)
+    : meshConfig(meshConfig), initialized(false), console(consoleMiddleware) {
+
+    if (console == nullptr) {
+        console = defaultConsole;
+    }
+
+    instance = this;
+
+    if (pkgManager == nullptr) {
+        packageManager = new PackageManager(console);
+    } else {
+        packageManager = pkgManager;
+    }
+    
+    if (peerMgr == nullptr) {
+        peerManager = new PeerManager(console);
+    } else {
+        peerManager = peerMgr;
+    }
+}
+  // Constructor with configuration only (uses default console if set)
+MESH_Receiver::~MESH_Receiver() {
+      // Clear static reference if it points to this instance
+    if (instance == this) {
+        instance = nullptr;
+    }
+}
+
+  // Set the default console for all instances
+void MESH_Receiver::setDefaultConsole(IConsoleMiddleware* consoleMiddleware) {
+    defaultConsole = consoleMiddleware;
+}
+
+bool MESH_Receiver::begin() {    
+      // Register callback for received data
+      // the esp_err_t type is defined in esp_err.h
+      // the esp_now_register_recv_cb function is defined in esp_now.h
+    esp_err_t result = esp_now_register_recv_cb([](const uint8_t *mac, const uint8_t *data, int len) {
+        MESH_Receiver::receivedCallback(mac, data, len);
+    });
+    
+    if (result != ESP_OK) {
+        return false;
+    }    
+    initialized = true;
+    return true;
+}
+
+void MESH_Receiver::processReceivedData(const Data& data, const uint8_t* sender_mac) {
+    
+}
+
+  // Static callback for received data
+void MESH_Receiver::receivedCallback(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+    if (instance) {
+        instance->onDataReceived(mac_addr, data, data_len);
+    }
+}
+
+  // Handle received data callback
+void MESH_Receiver::onDataReceived(const uint8_t* mac_addr, const uint8_t* data, int data_len) {
+    if (!initialized) {
+        return;
+    }
+      // Verify data size
+    if (data_len != sizeof(Data)) {
+        return;
+    }
+    Data receivedData;
+    memcpy(&receivedData, data, sizeof(Data));
+    
+
+      // Update last forwarding node
+    memcpy(receivedData.lastForwardingNode, mac_addr, meshConfig.getMacAddressLength());
+      // Create a processed copy for retransmission and Layer 2
+    Data processedData = receivedData;
+    // is the message relayed or original
+    bool isRelayed     = false;
+
+      // Check if we should increment hop count and mark as relay
+    uint8_t ownMac[meshConfig.getMacAddressLength()];
+    WiFi.macAddress(ownMac);
+    
+    // this check makes sure we do not relay our own messages
+    if (!MACHelper::compareMACAddresses(receivedData.sourceMAC, ownMac) && 
+        receivedData.hopCount < meshConfig.getMaxHopCount()) {
+        processedData.hopCount++;
+        processedData.messageType = meshConfig.getMessageTypeRetransmission();
+        isRelayed                 = true;
+    }
+    
+      // Add to package manager with appropriate hop count
+    if (packageManager) {
+        // If the message is relayed, add it to the package manager with the processed data
+        packageManager->addPackage(receivedData.sourceMAC, 
+            isRelayed ? processedData: receivedData,
+            receivedData.hopCount);
+    }
+    if (peerManager) {
+        // Update peer info
+        peerManager->updatePeer(mac_addr, receivedData, receivedData.hopCount);
+    }
+    
+      // Forward to Layer 2 with the PROCESSED data for relays ONLY IF CONFIGURED TO DO SO
+    if (layer2Sender && layer2Sender->isConnected()) {
+          // Check if individual updates should be sent using the numeric value check
+          // This works with the new #define format (SEND_INDIVIDUAL_UPDATES 0|1)
+        if (meshConfig.getSendIndividualUpdates()) {
+              // Send the processed data with incremented hop count if it's a relay,
+              // otherwise send the original data
+            layer2Sender->sendData(isRelayed ? processedData : receivedData, TELEMETRY_DATA);            
+        } 
+    }
+      // Process and retransmit if needed
+    if (isRelayed && meshSender) {
+          // IMPORTANT: Preserve the lastForwardingNode when retransmitting
+        bool sent = meshSender->sendData(processedData);
+          // if (sent && console) {
+          //     console->info(MODULE_NAME, "Successfully retransmitted message with hop count: " + 
+          //                 String(processedData.hopCount));
+          // }
+    }
+}

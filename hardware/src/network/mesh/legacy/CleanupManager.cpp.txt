@@ -1,0 +1,113 @@
+#include "CleanupManager.h"
+#include "../Config/MESH_config.h"
+#include <WiFi.h>
+
+// Initialize static members
+IConsoleMiddleware* CleanupManager::defaultConsole = nullptr;
+
+CleanupManager::CleanupManager(PeerManager* peerManager, PackageManager* packageManager, 
+                             IConsoleMiddleware* consoleMiddleware)
+    : peerManager(peerManager), packageManager(packageManager), console(consoleMiddleware),
+      peerTimeout(PEER_TIMEOUT), packageTimeout(PACKAGE_TIMEOUT),
+      lastCleanupTime(0), lastPeersRemoved(0), lastPackagesRemoved(0) {
+    
+    // If no console was provided, use the default
+    if (console == nullptr) {
+        console = defaultConsole;
+    }
+}
+
+// Set the default console for all instances
+void CleanupManager::setDefaultConsole(IConsoleMiddleware* consoleMiddleware) {
+    defaultConsole = consoleMiddleware;
+}
+
+void CleanupManager::setPeerTimeout(unsigned long timeout) {
+    peerTimeout = timeout;
+}
+
+void CleanupManager::setPackageTimeout(unsigned long timeout) {
+    packageTimeout = timeout;
+}
+
+void CleanupManager::performCleanup() {
+    // Store current time
+    lastCleanupTime = millis();
+    // First, keep track of active peers before cleanup
+    int initialActivePeers = peerManager->getActivePeerCount();
+    // Have the peer manager identify inactive peers
+    peerManager->cleanupInactivePeers();
+    // Calculate how many peers were removed
+    lastPeersRemoved = initialActivePeers - peerManager->getActivePeerCount();    
+    // Get the active peers list after cleanup
+    const std::vector<PeerInfo>& activePeers = peerManager->getActivePeers();
+    // Create a set of active MAC addresses for faster lookup
+    std::set<String> activeMacSet;
+    
+    // ADDED: Always include our own MAC address first
+    uint8_t ownMac[MAC_ADDRESS_LENGTH];
+    WiFi.macAddress(ownMac);
+    // Use MACHelper instead of local method
+    String ownMacStr = MACHelper::macToString(ownMac);
+    activeMacSet.insert(ownMacStr);
+    if (console) {
+        console->debug(MODULE_NAME, "Added own MAC to active set: " + ownMacStr);
+    }
+    
+    // Add other active peers
+    for (const auto& peer : activePeers) {
+        if (peer.isActive) {
+            // Use MACHelper instead of local method
+            String macStr = MACHelper::macToString(peer.macAddress);
+            activeMacSet.insert(macStr);
+            
+            if (console) {
+                console->debug(MODULE_NAME, "Added active MAC to set: " + macStr);
+            }
+        }
+    }
+    
+    if (console) {
+        console->debug(MODULE_NAME, "Active MAC set complete with " + String(activeMacSet.size()) + 
+                      " entries, starting package cleanup");
+    }
+    
+    // Now clean up the package manager, inform it which peers are still active
+    lastPackagesRemoved = packageManager->cleanupWithActiveList(activeMacSet, packageTimeout);
+    // Print cleanup information
+    // printCleanupStats();
+}
+
+void CleanupManager::printCleanupStats() {
+    // Use the available console to log statistics
+    if (console) {
+        console->info(MODULE_NAME, "=== CLEANUP RESULTS ===");
+        console->info(MODULE_NAME, "Peers removed: " + String(lastPeersRemoved));
+        console->info(MODULE_NAME, "Packages removed: " + String(lastPackagesRemoved));
+        console->info(MODULE_NAME, "Active peers remaining: " + String(peerManager->getActivePeerCount()));
+        
+        // Show our own MAC address
+        uint8_t ownMac[MAC_ADDRESS_LENGTH];
+        WiFi.macAddress(ownMac);
+        String ownMacStr = MACHelper::macToString(ownMac);
+        console->info(MODULE_NAME, "Local device MAC: " + ownMacStr);
+        
+        // Print the current peer list
+        if (peerManager) {
+            console->info(MODULE_NAME, "Printing peer details:");
+            peerManager->printPeerList();
+        } else {
+            console->error(MODULE_NAME, "PeerManager is NULL!");
+        }
+        
+        // Print package statistics  
+        if (packageManager) {
+            console->info(MODULE_NAME, "Printing package details:");
+            packageManager->printPackageStats();
+        } else {
+            console->error(MODULE_NAME, "PackageManager is NULL!");
+        }
+        
+        console->info(MODULE_NAME, "=== CLEANUP COMPLETE ===");
+    }
+}
