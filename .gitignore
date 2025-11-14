@@ -34,3 +34,14 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+#AI
+*CLAUDE*
+*CHATGPT*
+*.prompt
+*.response
+*.history
+*.session
+*_PROGRESS
+_migration_plan
+
