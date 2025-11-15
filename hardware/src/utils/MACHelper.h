@@ -2,7 +2,7 @@
 #define MAC_HELPER_H
 
 #include <Arduino.h>
-#include "../../Constants/MESH_Constants.h"
+#include "../config.h"
 /**
      MACHelper
      Utility class for MAC address operations

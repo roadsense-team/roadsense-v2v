@@ -77,6 +77,12 @@
 #define MAX_HOP_COUNT           3     // Maximum relay hops
 #define PEER_TIMEOUT_MS         60000 // 60 seconds
 
+// Mesh message management
+#define MAC_ADDRESS_LENGTH      6       // Standard 6-byte MAC address
+#define MAC_STRING_LENGTH       18      // "XX:XX:XX:XX:XX:XX\0"
+#define PACKAGE_TIMEOUT_MS      60000   // 60 seconds (message expiry)
+#define MAX_PACKAGES_PER_SOURCE 3       // Limit packages per source MAC
+
 // ============================================================================
 // MACHINE LEARNING CONFIGURATION
 // ============================================================================
