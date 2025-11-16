@@ -1,0 +1,158 @@
+/**
+ * @file main_phase2_test.cpp
+ * @brief Phase 2 Session 1 Test - EspNowTransport
+ *
+ * Tests basic ESP-NOW functionality:
+ * - Initialization
+ * - Broadcast send every 2 seconds
+ * - Receive and display messages
+ *
+ * HARDWARE TEST PLAN:
+ * 1. Flash this firmware to 2 ESP32 units (V001 and V002)
+ * 2. Open serial monitor on both units
+ * 3. Verify both units show "ESP-NOW initialized"
+ * 4. Verify each unit receives messages from the other
+ * 5. Check send/receive statistics every 10 seconds
+ */
+
+#include <Arduino.h>
+#include "config.h"
+#include "utils/Logger.h"
+#include "network/transport/EspNowTransport.h"
+#include "network/protocol/V2VMessage.h"
+
+// Global objects
+Logger& logger = Logger::getInstance();
+EspNowTransport transport(1);  // Channel 1
+
+// LED blink state
+unsigned long lastBlinkTime = 0;
+bool ledState = false;
+
+// Test message counter
+unsigned long messageCount = 0;
+unsigned long lastSendTime = 0;
+unsigned long lastStatsTime = 0;
+
+// Receive callback
+void onV2VReceive(const uint8_t* data, size_t len) {
+    logger.info("RECV", "Received " + String(len) + " bytes");
+
+    // Try to parse as V2VMessage
+    if (len == sizeof(V2VMessage)) {
+        V2VMessage* msg = (V2VMessage*)data;
+        logger.info("RECV", "Vehicle: " + String(msg->vehicleId));
+        logger.info("RECV", "Timestamp: " + String(msg->timestamp));
+        logger.info("RECV", "Hop count: " + String(msg->hopCount));
+    } else {
+        logger.warning("RECV", "Size mismatch! Expected " + String(sizeof(V2VMessage)) +
+                       ", got " + String(len));
+    }
+}
+
+void setup() {
+    // Initialize serial logging
+    logger.begin(SERIAL_BAUD_RATE);
+    logger.info("MAIN", "========================================");
+    logger.info("MAIN", "  Phase 2 Session 1 - ESP-NOW Test   ");
+    logger.info("MAIN", "========================================");
+    logger.info("MAIN", "");
+
+    // Vehicle ID warning
+    logger.warning("MAIN", "========================================");
+    logger.warning("MAIN", "  VEHICLE ID: " + String(VEHICLE_ID));
+    logger.warning("MAIN", "  !!! ENSURE EACH UNIT HAS UNIQUE ID !!!");
+    logger.warning("MAIN", "========================================");
+    logger.info("MAIN", "");
+
+    // Initialize status LED
+    pinMode(LED_STATUS_PIN, OUTPUT);
+    digitalWrite(LED_STATUS_PIN, LOW);
+
+    // Verify V2VMessage size
+    logger.info("MAIN", "V2VMessage size: " + String(sizeof(V2VMessage)) + " bytes");
+    if (sizeof(V2VMessage) == 90) {
+        logger.info("MAIN", "✓ V2VMessage size correct");
+    }
+
+    // Initialize ESP-NOW transport
+    logger.info("MAIN", "");
+    logger.info("MAIN", "Initializing ESP-NOW transport...");
+    if (!transport.begin()) {
+        logger.error("MAIN", "✗ ESP-NOW initialization FAILED!");
+        logger.error("MAIN", "System halted. Check wiring and restart.");
+        while (1) {
+            digitalWrite(LED_STATUS_PIN, millis() % 200 < 100);  // Fast blink = error
+            delay(10);
+        }
+    }
+
+    logger.info("MAIN", "✓ ESP-NOW transport initialized");
+
+    // Register receive callback
+    transport.onReceive(onV2VReceive);
+    logger.info("MAIN", "✓ Receive callback registered");
+
+    // Test complete
+    logger.info("MAIN", "");
+    logger.info("MAIN", "========================================");
+    logger.info("MAIN", "  System Ready - Starting Test Loop   ");
+    logger.info("MAIN", "========================================");
+    logger.info("MAIN", "Test: Sending V2VMessage every 2 seconds");
+    logger.info("MAIN", "");
+}
+
+void loop() {
+    unsigned long currentTime = millis();
+
+    // LED blink (heartbeat)
+    if (currentTime - lastBlinkTime >= 500) {
+        lastBlinkTime = currentTime;
+        ledState = !ledState;
+        digitalWrite(LED_STATUS_PIN, ledState ? HIGH : LOW);
+    }
+
+    // Send test message every 2 seconds
+    if (currentTime - lastSendTime >= 2000) {
+        lastSendTime = currentTime;
+        messageCount++;
+
+        // Create test V2VMessage
+        V2VMessage msg;
+        strncpy(msg.vehicleId, VEHICLE_ID, sizeof(msg.vehicleId));
+        msg.timestamp = millis();
+        msg.version = 2;
+        msg.hopCount = 0;
+
+        // Get local MAC for sourceMAC
+        transport.getLocalMAC(msg.sourceMAC);
+
+        // Fill with test data
+        msg.position.lat = 32.0853;
+        msg.position.lon = 34.7818;
+        msg.position.alt = 50.0;
+        msg.dynamics.speed = 10.0;
+        msg.dynamics.heading = 90.0;
+
+        // Send message
+        bool success = transport.send((uint8_t*)&msg, sizeof(msg));
+        if (success) {
+            logger.info("SEND", "Message #" + String(messageCount) + " sent (" +
+                        String(sizeof(msg)) + " bytes)");
+        } else {
+            logger.error("SEND", "Message #" + String(messageCount) + " FAILED");
+        }
+    }
+
+    // Print statistics every 10 seconds
+    if (currentTime - lastStatsTime >= 10000) {
+        lastStatsTime = currentTime;
+        logger.info("STATS", "========================================");
+        logger.info("STATS", "Send Count:    " + String(transport.getSendCount()));
+        logger.info("STATS", "Receive Count: " + String(transport.getReceiveCount()));
+        logger.info("STATS", "Fail Count:    " + String(transport.getFailCount()));
+        logger.info("STATS", "========================================");
+    }
+
+    delay(10);
+}
