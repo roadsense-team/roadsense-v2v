@@ -259,6 +259,17 @@ public:
      */
     void printPackageStats();
 
+    /**
+     * @brief Get total package count across all sources
+     *
+     * Counts all stored packages from all MAC addresses.
+     *
+     * @return uint32_t Total number of packages stored
+     *
+     * @note Useful for testing and monitoring memory usage
+     */
+    uint32_t getPackageCount() const;
+
 private:
     const String MODULE_NAME = "PackageManager";  ///< Logger module identifier
 

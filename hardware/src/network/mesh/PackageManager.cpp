@@ -30,6 +30,38 @@ void PackageManager::addPackage(const uint8_t* macAddress, const V2VMessage& msg
 
     unsigned long currentTime = millis();
 
+    // ========================================================================
+    // MAC LIMIT ENFORCEMENT (Fix for DoS vulnerability)
+    // ========================================================================
+    // If this is a NEW MAC and we're at capacity, evict the oldest MAC (LRU)
+    if (packages.find(sourceMacKey) == packages.end() &&  // New MAC (not currently tracked)
+        packages.size() >= MAX_TRACKED_MACS) {             // At capacity
+
+        // Find MAC with the oldest (earliest) receivedTime
+        auto oldestMAC = packages.end();
+        unsigned long oldestTime = ULONG_MAX;
+
+        for (auto it = packages.begin(); it != packages.end(); ++it) {
+            if (!it->second.empty()) {
+                // Get timestamp of oldest package for this MAC (front = oldest due to FIFO)
+                unsigned long macOldestTime = it->second.front().receivedTime;
+                if (macOldestTime < oldestTime) {
+                    oldestTime = macOldestTime;
+                    oldestMAC = it;
+                }
+            }
+        }
+
+        // Evict the oldest MAC
+        if (oldestMAC != packages.end()) {
+            Logger::getInstance().warning(MODULE_NAME,
+                "MAC limit reached (" + String(MAX_TRACKED_MACS) +
+                "), evicting oldest: " + oldestMAC->first +
+                " (age: " + String(currentTime - oldestTime) + "ms)");
+            packages.erase(oldestMAC);
+        }
+    }
+
     // Create new package with metadata
     PackageData newPackage;
     newPackage.message = msg;
@@ -37,7 +69,7 @@ void PackageManager::addPackage(const uint8_t* macAddress, const V2VMessage& msg
     newPackage.hopCount = hopCount;
     newPackage.processed = false;
 
-    // Get or create vector for this source MAC
+    // Get or create vector for this source MAC (now safe - we enforced limit above)
     auto& packageVector = packages[sourceMacKey];
 
     // DEDUPLICATION: Check for duplicate based on timestamp
@@ -72,7 +104,8 @@ void PackageManager::addPackage(const uint8_t* macAddress, const V2VMessage& msg
         "Added package from " + sourceMacKey +
         " (vehicle: " + String(msg.vehicleId) +
         ", hop: " + String(hopCount) +
-        ", total: " + String(packageVector.size()) + ")");
+        ", total: " + String(packageVector.size()) +
+        ", tracked MACs: " + String(packages.size()) + ")");
 }
 
 void PackageManager::addLocalPackage(const V2VMessage& msg, const uint8_t* ownMac) {
@@ -356,7 +389,8 @@ void PackageManager::processAllPendingPackages() {
 
 void PackageManager::printPackageStats() {
     Logger::getInstance().info(MODULE_NAME, "=== Package Statistics ===");
-    Logger::getInstance().info(MODULE_NAME, "Total MACs tracked: " + String(packages.size()));
+    Logger::getInstance().info(MODULE_NAME,
+        "Total MACs tracked: " + String(packages.size()) + " / " + String(MAX_TRACKED_MACS));
 
     int totalPackages = 0;
     int totalUnprocessed = 0;
@@ -384,6 +418,16 @@ void PackageManager::printPackageStats() {
         "Estimated memory: " + String(memoryUsage) + " bytes");
 
     Logger::getInstance().info(MODULE_NAME, "=========================");
+}
+
+uint32_t PackageManager::getPackageCount() const {
+    uint32_t totalPackages = 0;
+
+    for (const auto& entry : packages) {
+        totalPackages += entry.second.size();
+    }
+
+    return totalPackages;
 }
 
 int PackageManager::getUnprocessedCount(const std::vector<PackageData>& pkgVector) {

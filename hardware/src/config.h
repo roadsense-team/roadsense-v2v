@@ -82,6 +82,7 @@
 #define MAC_STRING_LENGTH       18      // "XX:XX:XX:XX:XX:XX\0"
 #define PACKAGE_TIMEOUT_MS      60000   // 60 seconds (message expiry)
 #define MAX_PACKAGES_PER_SOURCE 3       // Limit packages per source MAC
+#define MAX_TRACKED_MACS        20      // Maximum unique MAC addresses to track (3 vehicles × 3 = 9 expected, 20 allows safety margin)
 
 // ============================================================================
 // MACHINE LEARNING CONFIGURATION
