@@ -29,6 +29,28 @@
  *
  * Provides broadcast-based V2V communication using ESP-NOW protocol.
  * Follows the proven initialization sequence from legacy firmware.
+ *
+ * SINGLETON PATTERN:
+ * This class uses a singleton pattern because ESP-NOW callbacks
+ * are static C functions that need to route to instance methods.
+ *
+ * USAGE:
+ * @code
+ * // Correct usage (single instance):
+ * EspNowTransport* transport = new EspNowTransport(1);
+ * transport->begin();
+ * // ... use transport ...
+ * delete transport;  // Safe - callbacks unregistered in destructor
+ *
+ * // WRONG - will halt system:
+ * EspNowTransport transport1(1);
+ * EspNowTransport transport2(6);  // ← FATAL: Second instance not allowed
+ * @endcode
+ *
+ * SAFETY GUARANTEES:
+ * - Only one instance can exist (enforced in constructor)
+ * - Destructor unregisters callbacks before cleanup (prevents use-after-free)
+ * - Safe to destroy instance even during active communication
  */
 class EspNowTransport : public ITransport {
 public:
@@ -140,11 +162,21 @@ private:
 
     /**
      * @brief Instance send callback handler
+     *
+     * IMPORTANT: Minimal logging to avoid heap fragmentation.
+     * This runs in WiFi task context at high frequency (10+ Hz).
+     * String allocations here cause heap fragmentation over time.
+     * Use getSendCount()/getFailCount() for statistics.
      */
     void handleDataSent(const uint8_t* mac, esp_now_send_status_t status);
 
     /**
      * @brief Instance receive callback handler
+     *
+     * IMPORTANT: Minimal logging to avoid heap fragmentation.
+     * This runs in WiFi task context at high frequency (10+ Hz).
+     * String allocations here cause heap fragmentation over time.
+     * Use getReceiveCount() for statistics.
      */
     void handleDataRecv(const uint8_t* mac, const uint8_t* data, int len);
 

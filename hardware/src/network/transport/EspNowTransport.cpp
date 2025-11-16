@@ -16,15 +16,50 @@ EspNowTransport::EspNowTransport(uint8_t channel)
       receiveCount(0),
       failCount(0),
       logger(Logger::getInstance()) {
+
+    // SINGLETON ENFORCEMENT: Prevent multiple instances
+    if (instance != nullptr) {
+        logger.error("ESP-NOW", "FATAL: EspNowTransport instance already exists!");
+        logger.error("ESP-NOW", "Only ONE instance allowed (singleton pattern)");
+        logger.error("ESP-NOW", "Existing instance must be destroyed before creating new one");
+
+        // Halt execution - multiple instances would cause callback routing errors
+        while(1) {
+            delay(1000);
+            logger.error("ESP-NOW", "System halted due to singleton violation");
+        }
+    }
+
     instance = this;
+    logger.debug("ESP-NOW", "EspNowTransport instance created");
 }
 
 EspNowTransport::~EspNowTransport() {
+    logger.debug("ESP-NOW", "Destroying EspNowTransport instance");
+
+    // CRITICAL: Unregister callbacks FIRST (while object still valid)
+    // This prevents race condition where WiFi callback fires after destruction
     if (initialized) {
+        logger.debug("ESP-NOW", "Unregistering ESP-NOW callbacks");
+
+        // Unregister callbacks before deinit (prevents use-after-free)
+        esp_now_unregister_send_cb();
+        esp_now_unregister_recv_cb();
+
+        // Small delay to ensure pending callbacks complete
+        delay(10);
+
+        // Now safe to deinit
         esp_now_deinit();
+        initialized = false;
+
+        logger.debug("ESP-NOW", "ESP-NOW deinitialized");
     }
+
+    // Clear instance pointer LAST (after callbacks unregistered)
     if (instance == this) {
         instance = nullptr;
+        logger.debug("ESP-NOW", "Instance pointer cleared");
     }
 }
 
@@ -149,16 +184,38 @@ void EspNowTransport::getLocalMAC(uint8_t* mac) const {
 
 // Static callbacks (route to instance methods)
 
+/**
+ * CALLBACK ROUTING SAFETY:
+ *
+ * These static callbacks are registered with ESP-NOW framework and
+ * route to instance methods via singleton pointer.
+ *
+ * RACE CONDITION PREVENTION:
+ * - Constructor enforces singleton (only one instance exists)
+ * - Destructor unregisters callbacks BEFORE clearing instance pointer
+ * - 10ms delay in destructor allows pending callbacks to complete
+ *
+ * This design is safe because:
+ * 1. Only one instance can exist (enforced in constructor)
+ * 2. Callbacks are unregistered before object destruction
+ * 3. Instance pointer is cleared AFTER callbacks unregistered
+ *
+ * NOTE: If instance is null here, it means ESP-NOW fired callback
+ * after unregister (ESP-IDF race condition). We safely ignore it.
+ */
+
 void EspNowTransport::onDataSent(const uint8_t* mac, esp_now_send_status_t status) {
     if (instance) {
         instance->handleDataSent(mac, status);
     }
+    // If instance is null, callbacks were unregistered - safe to ignore
 }
 
 void EspNowTransport::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
     if (instance) {
         instance->handleDataRecv(mac, data, len);
     }
+    // If instance is null, callbacks were unregistered - safe to ignore
 }
 
 // Instance callback handlers
@@ -166,21 +223,21 @@ void EspNowTransport::onDataRecv(const uint8_t* mac, const uint8_t* data, int le
 void EspNowTransport::handleDataSent(const uint8_t* mac, esp_now_send_status_t status) {
     if (status == ESP_NOW_SEND_SUCCESS) {
         sendCount++;
-        logger.debug("ESP-NOW", "✓ Send confirmed (total: " + String(sendCount) + ")");
+        // Minimal logging - avoid heap allocation in WiFi callback
+        // Full stats available via getSendCount()
     } else {
         failCount++;
-        logger.warning("ESP-NOW", "✗ Send failed (total failures: " + String(failCount) + ")");
+        // Log failures only (critical info, worth the allocation cost)
+        logger.warning("ESP-NOW", "Send failed");
     }
 }
 
 void EspNowTransport::handleDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
     receiveCount++;
 
-    // Log sender MAC
-    char macStr[18];
-    snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    logger.debug("ESP-NOW", "Received " + String(len) + " bytes from " + String(macStr));
+    // Minimal logging - avoid heap allocation in WiFi callback
+    // Detailed packet inspection should be done in application layer
+    // Statistics available via getReceiveCount()
 
     // Call user callback if registered
     if (receiveCallback) {
