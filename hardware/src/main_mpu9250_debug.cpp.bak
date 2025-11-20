@@ -1,0 +1,154 @@
+/***************************************************************************
+ * MPU9250 Debug Test - Step-by-step initialization
+ ***************************************************************************/
+
+#include <Arduino.h>
+#include <MPU9250_WE.h>
+#include <Wire.h>
+
+#define MPU9250_ADDR 0x68
+
+MPU9250_WE myMPU9250 = MPU9250_WE(MPU9250_ADDR);
+
+void setup() {
+  Serial.begin(115200);
+  delay(2000);  // Longer delay for sensor power-up
+
+  Serial.println("\n========================================");
+  Serial.println("MPU9250 Debug Test - Detailed Init");
+  Serial.println("========================================\n");
+
+  // Step 1: Initialize I2C with explicit pins
+  Serial.println("Step 1: Initializing I2C bus...");
+  Wire.begin(21, 22);  // SDA=21, SCL=22
+  Wire.setClock(400000);  // 400kHz I2C speed
+  Serial.println("✅ I2C initialized (SDA=21, SCL=22, 400kHz)\n");
+
+  delay(100);  // Give I2C bus time to stabilize
+
+  // Step 2: Check if device responds at 0x68
+  Serial.println("Step 2: Checking I2C response at 0x68...");
+  Wire.beginTransmission(MPU9250_ADDR);
+  byte error = Wire.endTransmission();
+  if (error == 0) {
+    Serial.println("✅ Device responds at 0x68\n");
+  } else {
+    Serial.print("❌ I2C error code: ");
+    Serial.println(error);
+    Serial.println("HALTING\n");
+    while(1) delay(1000);
+  }
+
+  // Step 3: Try to initialize MPU9250
+  Serial.println("Step 3: Calling MPU9250.init()...");
+  delay(100);
+
+  if (!myMPU9250.init()) {
+    Serial.println("❌ init() returned false");
+    Serial.println("\nTrying alternative initialization...\n");
+
+    // Try with longer delay
+    delay(500);
+    if (!myMPU9250.init()) {
+      Serial.println("❌ Still failed after delay");
+
+      // Check WHO_AM_I register manually
+      Serial.println("\nReading WHO_AM_I register manually...");
+      Wire.beginTransmission(MPU9250_ADDR);
+      Wire.write(0x75);  // WHO_AM_I register
+      Wire.endTransmission(false);
+      Wire.requestFrom(MPU9250_ADDR, (uint8_t)1);
+
+      if (Wire.available()) {
+        byte whoAmI = Wire.read();
+        Serial.print("WHO_AM_I = 0x");
+        Serial.print(whoAmI, HEX);
+        Serial.print(" (");
+        Serial.print(whoAmI);
+        Serial.println(")");
+
+        if (whoAmI == 0x71) {
+          Serial.println("✅ Correct! This is an MPU9250 (0x71)");
+        } else if (whoAmI == 0x73) {
+          Serial.println("✅ This is an MPU9255 (0x73)");
+        } else if (whoAmI == 0x68) {
+          Serial.println("⚠️  This is an MPU6050 (0x68)");
+        } else {
+          Serial.println("❌ Unknown device ID!");
+        }
+      } else {
+        Serial.println("❌ No response from WHO_AM_I register");
+      }
+
+      Serial.println("\nPossible issues:");
+      Serial.println("1. Sensor is MPU6050 (3-axis) not MPU9250 (9-axis)");
+      Serial.println("2. Library initialization is too strict");
+      Serial.println("3. Sensor needs power cycle");
+      Serial.println("\nHALTING - Check sensor chip marking");
+      while(1) delay(1000);
+    } else {
+      Serial.println("✅ Success after delay!");
+    }
+  } else {
+    Serial.println("✅ init() succeeded!\n");
+  }
+
+  // Step 4: Try magnetometer
+  Serial.println("Step 4: Initializing magnetometer...");
+  if (!myMPU9250.initMagnetometer()) {
+    Serial.println("⚠️  Magnetometer init failed (expected for MPU6050)");
+  } else {
+    Serial.println("✅ Magnetometer initialized!\n");
+  }
+
+  // Step 5: Configure and test
+  Serial.println("Step 5: Configuring sensor...");
+  myMPU9250.setAccRange(MPU9250_ACC_RANGE_4G);
+  myMPU9250.setGyrRange(MPU9250_GYRO_RANGE_500);
+  myMPU9250.enableGyrDLPF();
+  myMPU9250.setGyrDLPF(MPU9250_DLPF_6);
+  myMPU9250.enableAccDLPF(true);
+  myMPU9250.setAccDLPF(MPU9250_DLPF_6);
+  Serial.println("✅ Configuration complete\n");
+
+  Serial.println("Step 6: Auto-calibrating...");
+  delay(1000);
+  myMPU9250.autoOffsets();
+  Serial.println("✅ Calibration done!\n");
+
+  Serial.println("========================================");
+  Serial.println("Initialization successful!");
+  Serial.println("Starting sensor readings...");
+  Serial.println("========================================\n");
+}
+
+void loop() {
+  xyzFloat gValue = myMPU9250.getGValues();
+  xyzFloat gyr = myMPU9250.getGyrValues();
+  xyzFloat magValue = myMPU9250.getMagValues();
+
+  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+  Serial.println("Acceleration (g):");
+  Serial.print("  X: "); Serial.print(gValue.x, 3);
+  Serial.print("  Y: "); Serial.print(gValue.y, 3);
+  Serial.print("  Z: "); Serial.println(gValue.z, 3);
+
+  Serial.println("Acceleration (m/s²):");
+  Serial.print("  X: "); Serial.print(gValue.x * 9.80665, 2);
+  Serial.print("  Y: "); Serial.print(gValue.y * 9.80665, 2);
+  Serial.print("  Z: "); Serial.println(gValue.z * 9.80665, 2);
+
+  Serial.println("Gyroscope (deg/s):");
+  Serial.print("  X: "); Serial.print(gyr.x, 2);
+  Serial.print("  Y: "); Serial.print(gyr.y, 2);
+  Serial.print("  Z: "); Serial.println(gyr.z, 2);
+
+  Serial.println("Magnetometer (µT):");
+  Serial.print("  X: "); Serial.print(magValue.x, 2);
+  Serial.print("  Y: "); Serial.print(magValue.y, 2);
+  Serial.print("  Z: "); Serial.println(magValue.z, 2);
+
+  Serial.println();
+  delay(2000);
+}

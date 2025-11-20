@@ -1,0 +1,183 @@
+/***************************************************************************
+ * RoadSense V2V - Phase 3 Session 2
+ *
+ * MPU6500 Working Test - Based on Library Example
+ *
+ * Purpose: Verify MPU6500 accelerometer and gyroscope are working correctly
+ *          using the dedicated MPU6500_WE library class.
+ *
+ * Hardware: MPU6500 (6-axis IMU)
+ * - WHO_AM_I: 0x70
+ * - Accelerometer ✅
+ * - Gyroscope ✅
+ * - Magnetometer ❌ (not present)
+ *
+ * Wiring:
+ * - VCC → 3.3V (Pin 3U)
+ * - GND → GND
+ * - SCL → GPIO 22
+ * - SDA → GPIO 21
+ *
+ * Expected Output:
+ * - Accel Z ≈ 1.0g (9.8 m/s²) when flat
+ * - Gyro ≈ 0.0 deg/s when stationary
+ *
+ * Created: November 17, 2025
+ * Based on: MPU6500_all_data.ino example from MPU9250_WE library
+ ***************************************************************************/
+
+#include <Arduino.h>
+#include <MPU6500_WE.h>  // ← Use MPU6500_WE class, not MPU9250_WE
+#include <Wire.h>
+
+#define MPU6500_ADDR 0x68
+
+// Create MPU6500 object (not MPU9250!)
+MPU6500_WE myMPU6500 = MPU6500_WE(MPU6500_ADDR);
+
+void setup() {
+  Serial.begin(115200);
+  delay(2000);  // Give serial monitor time to connect
+
+  Serial.println("\n========================================");
+  Serial.println("RoadSense V2V - MPU6500 Working Test");
+  Serial.println("Phase 3 Session 2");
+  Serial.println("========================================\n");
+
+  // Initialize I2C
+  Serial.println("Initializing I2C bus...");
+  Wire.begin(21, 22);  // SDA=21, SCL=22
+  Serial.println("✅ I2C initialized (SDA=21, SCL=22)\n");
+
+  // Initialize MPU6500
+  Serial.print("Initializing MPU6500... ");
+  if (!myMPU6500.init()) {
+    Serial.println("❌ FAILED!");
+    Serial.println("\nThis should not happen - we confirmed sensor is present!");
+    Serial.println("Check library installation.");
+    while (1) delay(1000);
+  }
+  Serial.println("✅ SUCCESS!");
+  Serial.println("MPU6500 is connected and responding\n");
+
+  // Configure sensor ranges
+  Serial.println("Configuring sensor settings...");
+
+  myMPU6500.setAccRange(MPU6500_ACC_RANGE_4G);      // ±4g (matches config.h)
+  Serial.println("✅ Accelerometer range: ±4g");
+
+  myMPU6500.setGyrRange(MPU6500_GYRO_RANGE_500);    // ±500 deg/s
+  Serial.println("✅ Gyroscope range: ±500 deg/s");
+
+  // Enable digital low-pass filters for noise reduction
+  myMPU6500.enableGyrDLPF();
+  myMPU6500.setGyrDLPF(MPU6500_DLPF_6);  // 5Hz bandwidth (lowest noise)
+  Serial.println("✅ Gyroscope DLPF: Level 6 (5Hz, lowest noise)");
+
+  myMPU6500.enableAccDLPF(true);
+  myMPU6500.setAccDLPF(MPU6500_DLPF_6);  // 5Hz bandwidth (lowest noise)
+  Serial.println("✅ Accelerometer DLPF: Level 6 (5Hz, lowest noise)");
+
+  // Set sample rate divider
+  myMPU6500.setSampleRateDivider(5);
+  Serial.println("✅ Sample rate divider: 5");
+
+  Serial.println();
+  Serial.println("----------------------------------------");
+  Serial.println("Auto-calibrating gyroscope and accelerometer...");
+  Serial.println("IMPORTANT: Keep sensor flat and still!");
+  Serial.println("----------------------------------------");
+  delay(2000);  // Give user time to position sensor
+
+  myMPU6500.autoOffsets();
+
+  Serial.println("✅ Calibration complete!\n");
+  Serial.println("========================================");
+  Serial.println("Starting continuous sensor readings...");
+  Serial.println("========================================\n");
+  delay(500);
+}
+
+void loop() {
+  // Read sensor data
+  xyzFloat gValue = myMPU6500.getGValues();        // Acceleration (g-force)
+  xyzFloat gyr = myMPU6500.getGyrValues();         // Gyroscope (deg/s)
+  float temp = myMPU6500.getTemperature();         // Temperature (°C)
+  float resultantG = myMPU6500.getResultantG(gValue);  // Total magnitude
+
+  // Print separator
+  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+  // Print acceleration (library returns g-force)
+  Serial.println("Acceleration (g-force):");
+  Serial.print("  X: "); Serial.print(gValue.x, 3);
+  Serial.print("  Y: "); Serial.print(gValue.y, 3);
+  Serial.print("  Z: "); Serial.print(gValue.z, 3);
+  Serial.print("  |G|: "); Serial.println(resultantG, 3);
+
+  // Validation
+  if (abs(gValue.z - 1.0) < 0.1 && abs(resultantG - 1.0) < 0.1) {
+    Serial.println("  ✅ Z-axis correct (~1.0g when flat, |G| ≈ 1.0g)");
+  } else {
+    Serial.println("  ⚠️  Sensor may be tilted or readings incorrect");
+  }
+
+  // Convert to m/s² (what we'll use in production V2VMessage)
+  float ax_mss = gValue.x * 9.80665f;
+  float ay_mss = gValue.y * 9.80665f;
+  float az_mss = gValue.z * 9.80665f;
+
+  Serial.println("Acceleration (m/s²) [V2VMessage format]:");
+  Serial.print("  X: "); Serial.print(ax_mss, 2);
+  Serial.print("  Y: "); Serial.print(ay_mss, 2);
+  Serial.print("  Z: "); Serial.println(az_mss, 2);
+
+  Serial.println();
+
+  // Print gyroscope (library returns deg/s)
+  Serial.println("Gyroscope (deg/s):");
+  Serial.print("  X: "); Serial.print(gyr.x, 2);
+  Serial.print("  Y: "); Serial.print(gyr.y, 2);
+  Serial.print("  Z: "); Serial.println(gyr.z, 2);
+
+  // Validation
+  if (abs(gyr.x) < 1.0 && abs(gyr.y) < 1.0 && abs(gyr.z) < 1.0) {
+    Serial.println("  ✅ All axes near zero (sensor stationary)");
+  } else {
+    Serial.println("  ⚠️  Sensor appears to be moving or noisy");
+  }
+
+  // Convert to rad/s (what we'll use in production V2VMessage)
+  float gx_rads = gyr.x * DEG_TO_RAD;
+  float gy_rads = gyr.y * DEG_TO_RAD;
+  float gz_rads = gyr.z * DEG_TO_RAD;
+
+  Serial.println("Gyroscope (rad/s) [V2VMessage format]:");
+  Serial.print("  X: "); Serial.print(gx_rads, 3);
+  Serial.print("  Y: "); Serial.print(gy_rads, 3);
+  Serial.print("  Z: "); Serial.println(gz_rads, 3);
+
+  Serial.println();
+
+  // Print temperature
+  Serial.print("Temperature: ");
+  Serial.print(temp, 1);
+  Serial.println(" °C");
+
+  Serial.println();
+
+  // Overall status
+  Serial.println("Status:");
+  if (abs(gValue.z - 1.0) < 0.1 &&
+      abs(gyr.x) < 1.0 && abs(gyr.y) < 1.0 && abs(gyr.z) < 1.0) {
+    Serial.println("  ✅✅✅ MPU6500 WORKING CORRECTLY ✅✅✅");
+    Serial.println("  Accelerometer: ✅ Good");
+    Serial.println("  Gyroscope: ✅ Good");
+    Serial.println("  Ready for MPU6500Driver implementation!");
+  } else {
+    Serial.println("  ⚠️  Check sensor positioning or readings");
+  }
+
+  Serial.println();
+  delay(2000);  // Update every 2 seconds
+}

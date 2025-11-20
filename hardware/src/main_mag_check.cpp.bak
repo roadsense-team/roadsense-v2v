@@ -1,0 +1,131 @@
+/***************************************************************************
+ * Check for AK8963 Magnetometer
+ *
+ * The MPU9250 contains:
+ * - MPU6500 (accel + gyro) at I2C address 0x68 with WHO_AM_I = 0x70
+ * - AK8963 (magnetometer) at I2C address 0x0C
+ *
+ * If we find the magnetometer, it's an MPU9250 (just with wrong ID)
+ * If no magnetometer, it's an MPU6500 (still useful!)
+ ***************************************************************************/
+
+#include <Arduino.h>
+#include <Wire.h>
+
+#define MPU9250_ADDR 0x68
+#define AK8963_ADDR  0x0C  // Magnetometer I2C address
+
+void setup() {
+  Serial.begin(115200);
+  delay(2000);
+
+  Serial.println("\n========================================");
+  Serial.println("MPU6500/MPU9250 Identification Test");
+  Serial.println("========================================\n");
+
+  Wire.begin(21, 22);
+  delay(100);
+
+  // Check MPU6500/MPU9250
+  Serial.println("Step 1: Checking MPU6500 at 0x68...");
+  Wire.beginTransmission(MPU9250_ADDR);
+  Wire.write(0x75);  // WHO_AM_I register
+  Wire.endTransmission(false);
+  Wire.requestFrom((uint8_t)MPU9250_ADDR, (uint8_t)1);
+
+  if (Wire.available()) {
+    byte whoAmI = Wire.read();
+    Serial.print("WHO_AM_I = 0x");
+    Serial.print(whoAmI, HEX);
+    Serial.print(" (");
+    Serial.print(whoAmI);
+    Serial.println(")");
+
+    if (whoAmI == 0x70) {
+      Serial.println("✅ Confirmed: MPU6500 detected");
+      Serial.println("   (6-axis: accelerometer + gyroscope)");
+    } else if (whoAmI == 0x71) {
+      Serial.println("✅ Confirmed: MPU9250 detected");
+      Serial.println("   (9-axis: accel + gyro + mag)");
+    }
+  }
+
+  Serial.println();
+
+  // Enable magnetometer I2C passthrough
+  Serial.println("Step 2: Enabling I2C passthrough...");
+  Wire.beginTransmission(MPU9250_ADDR);
+  Wire.write(0x37);  // INT_PIN_CFG register
+  Wire.write(0x02);  // Enable I2C bypass
+  Wire.endTransmission();
+  delay(100);
+  Serial.println("✅ I2C bypass enabled\n");
+
+  // Check for AK8963 magnetometer
+  Serial.println("Step 3: Checking for AK8963 magnetometer at 0x0C...");
+  Wire.beginTransmission(AK8963_ADDR);
+  byte error = Wire.endTransmission();
+
+  if (error == 0) {
+    Serial.println("✅ Magnetometer responds at 0x0C!");
+
+    // Read magnetometer WHO_AM_I
+    Wire.beginTransmission(AK8963_ADDR);
+    Wire.write(0x00);  // WIA register
+    Wire.endTransmission(false);
+    Wire.requestFrom((uint8_t)AK8963_ADDR, (uint8_t)1);
+
+    if (Wire.available()) {
+      byte magWhoAmI = Wire.read();
+      Serial.print("Magnetometer WHO_AM_I = 0x");
+      Serial.print(magWhoAmI, HEX);
+
+      if (magWhoAmI == 0x48) {
+        Serial.println(" (0x48 - AK8963 confirmed!)");
+      } else {
+        Serial.print(" (Expected 0x48, got 0x");
+        Serial.print(magWhoAmI, HEX);
+        Serial.println(")");
+      }
+    }
+  } else {
+    Serial.print("❌ No response at 0x0C (error code: ");
+    Serial.print(error);
+    Serial.println(")");
+    Serial.println("   Magnetometer not present");
+  }
+
+  Serial.println();
+  Serial.println("========================================");
+  Serial.println("CONCLUSION:");
+  Serial.println("========================================");
+
+  if (error == 0) {
+    Serial.println("✅ You have an MPU9250!");
+    Serial.println("   (MPU6500 + AK8963 magnetometer)");
+    Serial.println();
+    Serial.println("Issue: WHO_AM_I = 0x70 instead of 0x71");
+    Serial.println("This is a known variant/clone issue.");
+    Serial.println();
+    Serial.println("Solution:");
+    Serial.println("We'll modify the driver to accept 0x70");
+  } else {
+    Serial.println("⚠️  You have an MPU6500 (6-axis only)");
+    Serial.println("   No magnetometer detected");
+    Serial.println();
+    Serial.println("Impact:");
+    Serial.println("- Accelerometer: ✅ Available");
+    Serial.println("- Gyroscope: ✅ Available");
+    Serial.println("- Magnetometer: ❌ Not available");
+    Serial.println();
+    Serial.println("This still works for RoadSense!");
+    Serial.println("We just won't have compass heading.");
+  }
+  Serial.println("========================================\n");
+}
+
+void loop() {
+  delay(5000);
+  Serial.println("\n--- Rescanning ---");
+  setup();
+}

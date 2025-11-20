@@ -1,13 +1,10 @@
 /**
  * @file IImuSensor.h
- * @brief Abstract interface for 9-axis Inertial Measurement Units (IMU)
+ * @brief Abstract interface for IMU sensors
  *
- * Defines a hardware-independent interface for IMU sensors that provide:
- * - 3-axis accelerometer (m/s²)
- * - 3-axis gyroscope (rad/s)
- * - 3-axis magnetometer (μT)
- *
- * Implementations: MPU9250 (primary), MPU6050 (legacy compatibility)
+ * Defines a hardware-independent interface for IMU sensors. On current hardware
+ * (MPU6500) only 6 axes are available (accel + gyro); magnetometer fields will
+ * be zeroed. Interface keeps mag fields for future 9-axis upgrades.
  */
 
 #ifndef IIMUSENSOR_H
@@ -20,8 +17,8 @@
  * @brief Abstract base class for 9-axis IMU sensors
  *
  * Provides a unified interface for reading accelerometer, gyroscope,
- * and magnetometer data. Includes calibration support for magnetometer
- * hard-iron and soft-iron distortion correction.
+ * and magnetometer data. Current hardware (MPU6500) lacks a magnetometer, so
+ * mag values will be zeros; interface remains for future 9-axis parts.
  */
 class IImuSensor {
 public:
@@ -78,21 +75,19 @@ public:
     /**
      * @brief Read current IMU measurements
      *
-     * Reads all 9 axes (accelerometer, gyroscope, magnetometer) in a single
-     * operation. Apply calibration corrections if available.
+     * Reads available axes (accelerometer, gyroscope, and magnetometer where
+     * supported). Apply calibration corrections if available.
      *
      * @return ImuData struct containing sensor readings and timestamp
      */
     virtual ImuData read() = 0;
 
     /**
-     * @brief Perform magnetometer calibration
+     * @brief Perform sensor calibration
      *
-     * Guides user through figure-8 pattern calibration to determine:
-     * - Hard-iron offsets (constant magnetic interference)
-     * - Soft-iron scale factors (directional distortion)
-     *
-     * Typically requires 30 seconds of movement in all orientations.
+     * For 6-axis hardware (MPU6500), this calibrates accelerometer/gyroscope
+     * offsets only. Magnetometer fields are zeroed because the device lacks a
+     * magnetometer. Future 9-axis implementations may include mag calibration.
      *
      * @return true if calibration successful, false otherwise
      */
@@ -121,7 +116,7 @@ public:
     /**
      * @brief Check if sensor is calibrated
      *
-     * @return true if magnetometer calibration has been performed and loaded
+     * @return true if available calibration data (accel/gyro or mag) has been loaded
      */
     virtual bool isCalibrated() const = 0;
 

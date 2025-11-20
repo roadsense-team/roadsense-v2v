@@ -1,0 +1,227 @@
+/***************************************************************************
+ * RoadSense V2V - Phase 3 Session 1: Step 1
+ *
+ * MPU9250 Hardware Connection Test
+ *
+ * Purpose: Verify MPU9250 sensor is connected and responding correctly
+ *          before implementing the production driver.
+ *
+ * Expected Output:
+ * - "MPU9250 is connected"
+ * - "Magnetometer is connected"
+ * - Accel Z ≈ 1.0g when flat on table
+ * - Gyro ≈ 0.0 deg/s when stationary
+ * - Mag non-zero values (Earth's magnetic field)
+ *
+ * Hardware Configuration (from HARDWARE_LAYOUT.md):
+ * - VCC → Pin 3U (3.3V)
+ * - GND → GND
+ * - SCL → GPIO 22
+ * - SDA → GPIO 21
+ * - ADO → Not connected (default I2C address 0x68)
+ *
+ * Based on: MPU9250_WE library example "MPU9250_all_data.ino"
+ *
+ * Created: November 16, 2025
+ ***************************************************************************/
+
+#include <Arduino.h>
+#include <MPU9250_WE.h>
+#include <Wire.h>
+
+#define MPU9250_ADDR 0x68
+
+MPU9250_WE myMPU9250 = MPU9250_WE(MPU9250_ADDR);
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);  // Give serial monitor time to connect
+
+  Serial.println("========================================");
+  Serial.println("RoadSense V2V - MPU9250 Hardware Test");
+  Serial.println("Phase 3 Session 1 - Step 1");
+  Serial.println("========================================");
+  Serial.println();
+
+  // Initialize I2C bus
+  Wire.begin();
+  Serial.println("I2C bus initialized (SDA=21, SCL=22)");
+  Serial.println();
+
+  // Initialize MPU9250 (accelerometer + gyroscope)
+  Serial.print("Initializing MPU9250 (I2C address 0x68)... ");
+  if (!myMPU9250.init()) {
+    Serial.println("❌ FAILED!");
+    Serial.println();
+    Serial.println("Troubleshooting:");
+    Serial.println("1. Check wiring:");
+    Serial.println("   - VCC → Pin 3U (3.3V)");
+    Serial.println("   - GND → GND");
+    Serial.println("   - SCL → GPIO 22");
+    Serial.println("   - SDA → GPIO 21");
+    Serial.println("2. Verify sensor is powered (LED on sensor board)");
+    Serial.println("3. Try a different I2C address:");
+    Serial.println("   - 0x68 (ADO = LOW or not connected)");
+    Serial.println("   - 0x69 (ADO = HIGH)");
+    Serial.println();
+    Serial.println("HALTING - Fix hardware before continuing");
+    while (1) {
+      delay(1000);
+    }
+  }
+  Serial.println("✅ SUCCESS!");
+
+  // Initialize magnetometer (AK8963)
+  Serial.print("Initializing magnetometer (AK8963)... ");
+  if (!myMPU9250.initMagnetometer()) {
+    Serial.println("❌ FAILED!");
+    Serial.println();
+    Serial.println("Note: Magnetometer failure is less critical.");
+    Serial.println("Accelerometer and gyroscope are still functional.");
+    Serial.println("Continuing with limited functionality...");
+    Serial.println();
+  } else {
+    Serial.println("✅ SUCCESS!");
+  }
+
+  Serial.println();
+  Serial.println("----------------------------------------");
+  Serial.println("Configuring sensor settings...");
+  Serial.println("----------------------------------------");
+
+  // Configure accelerometer range
+  myMPU9250.setAccRange(MPU9250_ACC_RANGE_4G);
+  Serial.println("✅ Accelerometer range: ±4g");
+
+  // Configure gyroscope range
+  myMPU9250.setGyrRange(MPU9250_GYRO_RANGE_500);
+  Serial.println("✅ Gyroscope range: ±500 deg/s");
+
+  // Configure magnetometer sample rate
+  myMPU9250.setMagOpMode(AK8963_CONT_MODE_100HZ);
+  Serial.println("✅ Magnetometer mode: Continuous 100Hz");
+
+  // Enable digital low-pass filters (DLPF) for noise reduction
+  myMPU9250.enableGyrDLPF();
+  myMPU9250.setGyrDLPF(MPU9250_DLPF_6);  // 5Hz bandwidth (lowest noise)
+  Serial.println("✅ Gyroscope DLPF: Level 6 (5Hz, lowest noise)");
+
+  myMPU9250.enableAccDLPF(true);
+  myMPU9250.setAccDLPF(MPU9250_DLPF_6);  // 5Hz bandwidth (lowest noise)
+  Serial.println("✅ Accelerometer DLPF: Level 6 (5Hz, lowest noise)");
+
+  Serial.println();
+  Serial.println("----------------------------------------");
+  Serial.println("Auto-calibrating gyroscope and accelerometer...");
+  Serial.println("IMPORTANT: Keep sensor flat and still!");
+  Serial.println("----------------------------------------");
+  delay(2000);  // Give user time to position sensor
+
+  myMPU9250.autoOffsets();
+
+  Serial.println("✅ Calibration complete!");
+  Serial.println();
+  Serial.println("========================================");
+  Serial.println("Starting continuous sensor readings...");
+  Serial.println("========================================");
+  Serial.println();
+
+  delay(500);
+}
+
+void loop() {
+  // Read sensor data
+  xyzFloat gValue = myMPU9250.getGValues();        // Acceleration (g-force)
+  xyzFloat gyr = myMPU9250.getGyrValues();         // Gyroscope (deg/s)
+  xyzFloat magValue = myMPU9250.getMagValues();    // Magnetometer (µT)
+  float temp = myMPU9250.getTemperature();         // Temperature (°C)
+  float resultantG = myMPU9250.getResultantG(gValue);  // Total acceleration magnitude
+
+  // Print separator
+  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+  // Print acceleration (library returns g-force)
+  Serial.println("Acceleration (g-force):");
+  Serial.print("  X: "); Serial.print(gValue.x, 3);
+  Serial.print("  Y: "); Serial.print(gValue.y, 3);
+  Serial.print("  Z: "); Serial.print(gValue.z, 3);
+  Serial.print("  |G|: "); Serial.println(resultantG, 3);
+
+  // Expected: Z ≈ 1.0g when flat, |G| ≈ 1.0g
+  if (abs(gValue.z - 1.0) < 0.1) {
+    Serial.println("  ✅ Z-axis correct (~1.0g when flat)");
+  } else {
+    Serial.println("  ⚠️  Z-axis unexpected (should be ~1.0g when flat)");
+  }
+
+  // Convert to m/s² for reference (what we'll use in production)
+  Serial.println("Acceleration (m/s²):");
+  Serial.print("  X: "); Serial.print(gValue.x * 9.80665, 2);
+  Serial.print("  Y: "); Serial.print(gValue.y * 9.80665, 2);
+  Serial.print("  Z: "); Serial.println(gValue.z * 9.80665, 2);
+
+  Serial.println();
+
+  // Print gyroscope (library returns deg/s)
+  Serial.println("Gyroscope (deg/s):");
+  Serial.print("  X: "); Serial.print(gyr.x, 2);
+  Serial.print("  Y: "); Serial.print(gyr.y, 2);
+  Serial.print("  Z: "); Serial.println(gyr.z, 2);
+
+  // Expected: All axes ≈ 0.0 when stationary
+  if (abs(gyr.x) < 1.0 && abs(gyr.y) < 1.0 && abs(gyr.z) < 1.0) {
+    Serial.println("  ✅ All axes near zero (sensor stationary)");
+  } else {
+    Serial.println("  ⚠️  Sensor appears to be moving or noisy");
+  }
+
+  // Convert to rad/s for reference (what we'll use in production)
+  Serial.println("Gyroscope (rad/s):");
+  Serial.print("  X: "); Serial.print(gyr.x * DEG_TO_RAD, 3);
+  Serial.print("  Y: "); Serial.print(gyr.y * DEG_TO_RAD, 3);
+  Serial.print("  Z: "); Serial.println(gyr.z * DEG_TO_RAD, 3);
+
+  Serial.println();
+
+  // Print magnetometer (library returns µT)
+  Serial.println("Magnetometer (µT):");
+  Serial.print("  X: "); Serial.print(magValue.x, 2);
+  Serial.print("  Y: "); Serial.print(magValue.y, 2);
+  Serial.print("  Z: "); Serial.println(magValue.z, 2);
+
+  // Expected: Non-zero values (Earth's magnetic field is ~25-65 µT)
+  float magMagnitude = sqrt(magValue.x * magValue.x +
+                            magValue.y * magValue.y +
+                            magValue.z * magValue.z);
+  Serial.print("  |B|: "); Serial.print(magMagnitude, 2); Serial.println(" µT");
+
+  if (magMagnitude > 10.0 && magMagnitude < 100.0) {
+    Serial.println("  ✅ Magnitude reasonable (Earth's field ~25-65 µT)");
+  } else if (magMagnitude < 1.0) {
+    Serial.println("  ⚠️  Magnetometer not responding or not calibrated");
+  } else {
+    Serial.println("  ⚠️  High interference - move away from metal/electronics");
+  }
+
+  Serial.println();
+
+  // Print temperature
+  Serial.print("Temperature: ");
+  Serial.print(temp, 1);
+  Serial.println(" °C");
+
+  Serial.println();
+
+  // Print overall status
+  Serial.println("Status:");
+  if (abs(gValue.z - 1.0) < 0.1 &&
+      abs(gyr.x) < 1.0 && abs(gyr.y) < 1.0 && abs(gyr.z) < 1.0 &&
+      magMagnitude > 10.0) {
+    Serial.println("  ✅✅✅ ALL SENSORS WORKING CORRECTLY ✅✅✅");
+    Serial.println("  Ready to proceed to Step 2!");
+  } else {
+    Serial.println("  ⚠️  Some sensors may need attention (see above)");
+  }
+
+  delay(2000);  // Update every 2 seconds
+}

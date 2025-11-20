@@ -28,10 +28,11 @@
 // HARDWARE PIN ASSIGNMENTS
 // ============================================================================
 
-// MPU9250 9-Axis IMU (I2C)
+// MPU6500 6-Axis IMU (I2C) - ⚠️ Hardware: MPU6500 not MPU9250
 #define I2C_SDA_PIN       21
 #define I2C_SCL_PIN       22
-#define MPU9250_I2C_ADDR  0x68  // or 0x69 if AD0 pin is high
+#define I2C_CLOCK_HZ      400000  // 400 kHz (fast mode I2C)
+#define MPU6500_I2C_ADDR  0x68    // MPU6500 I2C address (WHO_AM_I: 0x70)
 
 // NEO-6M GPS (UART)
 #define GPS_RX_PIN        16    // ESP32 RX ← GPS TX
@@ -52,12 +53,18 @@
 #define IMU_SAMPLE_RATE_HZ      10    // 10 Hz = 100ms interval
 #define IMU_SAMPLE_INTERVAL_MS  (1000 / IMU_SAMPLE_RATE_HZ)
 
+// IMU hardware configuration (MPU6500)
+#define IMU_ACCEL_RANGE_G       4     // ±4g (covers vehicle dynamics: ±2g typical, 4g for hard braking)
+#define IMU_GYRO_RANGE_DPS      500   // ±500 deg/s (covers aggressive turns: ~200 deg/s max)
+#define IMU_DLPF_BANDWIDTH_HZ   5     // Digital low-pass filter bandwidth (DLPF_6 = 5 Hz)
+#define IMU_SAMPLE_RATE_DIV     ((1000 / IMU_SAMPLE_RATE_HZ) - 1)  // Divider: 99 for 10 Hz
+
 // GPS sampling rate
 #define GPS_SAMPLE_RATE_HZ      1     // 1 Hz = 1000ms interval
 #define GPS_CACHE_TIMEOUT_MS    30000 // 30 seconds
 
-// Magnetometer calibration
-#define MAG_CALIB_DURATION_MS   30000 // 30 seconds for figure-8 pattern
+// ⚠️ Magnetometer calibration NOT APPLICABLE (MPU6500 has no magnetometer)
+// GPS heading used instead of compass heading
 
 // ============================================================================
 // NETWORK CONFIGURATION

@@ -16,7 +16,6 @@
 
 // Create IMU driver instance
 MPU6500Driver imu;
-bool buttonHandled = false;
 
 void setup() {
     // Initialize logger
@@ -24,43 +23,35 @@ void setup() {
     log.begin(SERIAL_BAUD_RATE);
     log.setLogLevel(LOG_DEBUG);
 
-    pinMode(BUTTON_CALIB_PIN, INPUT_PULLUP);
-
     delay(2000);  // Give serial time to connect
 
-    log.info("TEST", "========================================");
-    log.info("TEST", "MPU6500Driver Test Firmware");
-    log.info("TEST", String("Vehicle ID: ") + VEHICLE_ID);
-    log.info("TEST", "========================================");
+    log.info("========================================");
+    log.info("MPU6500Driver Test Firmware");
+    log.info("Vehicle ID: %s", VEHICLE_ID);
+    log.info("========================================\n");
 
     // Initialize IMU
-    log.info("TEST", "Initializing MPU6500Driver...");
+    log.info("[TEST] Initializing MPU6500Driver...");
     if (!imu.begin()) {
-        log.error("TEST", "❌ IMU initialization FAILED!");
-        log.error("TEST", String("Check wiring: SDA=") + I2C_SDA_PIN + ", SCL=" + I2C_SCL_PIN);
-        log.error("TEST", "HALTING");
+        log.error("[TEST] ❌ IMU initialization FAILED!");
+        log.error("[TEST] Check wiring: SDA=%d, SCL=%d", I2C_SDA_PIN, I2C_SCL_PIN);
+        log.error("[TEST] HALTING");
         while (1) {
             delay(1000);
         }
     }
 
-    log.info("TEST", "✅ IMU initialized successfully");
-    log.info("TEST", String("Sensor: ") + imu.getName());
-    log.info("TEST", "Starting accel/gyro calibration (keep flat & still)...");
-    if (imu.calibrate()) {
-        log.info("TEST", "✅ Calibration complete");
-    } else {
-        log.warning("TEST", "⚠️ Calibration failed or skipped");
-    }
-    log.info("TEST", String("Calibrated: ") + (imu.isCalibrated() ? "YES" : "NO"));
+    log.info("[TEST] ✅ IMU initialized successfully");
+    log.info("[TEST] Sensor: %s", imu.getName());
+    log.info("[TEST] Calibrated: %s\n", imu.isCalibrated() ? "YES" : "NO");
 
     if (!imu.isCalibrated()) {
-        log.warning("TEST", "⚠️  Sensor NOT calibrated!");
-        log.warning("TEST", "⚠️  Hold BOOT button (GPIO 0) during next boot to calibrate");
-        log.warning("TEST", "⚠️  (Feature to be implemented in final firmware)\n");
+        log.warn("[TEST] ⚠️  Sensor NOT calibrated!");
+        log.warn("[TEST] ⚠️  Hold BOOT button (GPIO 0) during next boot to calibrate");
+        log.warn("[TEST] ⚠️  (Feature to be implemented in final firmware)\n");
     }
 
-    log.info("TEST", "Starting sensor readings...\n");
+    log.info("[TEST] Starting sensor readings...\n");
 }
 
 void loop() {
@@ -116,19 +107,5 @@ void loop() {
 
     Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
-    // Trigger calibration if BOOT button pressed (active low)
-    if (digitalRead(BUTTON_CALIB_PIN) == LOW && !buttonHandled) {
-        Serial.println("[CAL ] Button pressed - starting calibration...");
-        if (imu.calibrate()) {
-            Serial.println("[CAL ] ✅ Calibration complete");
-        } else {
-            Serial.println("[CAL ] ⚠️ Calibration failed or skipped");
-        }
-        buttonHandled = true;
-    }
-    if (digitalRead(BUTTON_CALIB_PIN) == HIGH) {
-        buttonHandled = false;
-    }
-
-    delay(2000);  // ~0.5 Hz update rate for easier observation
+    delay(1000);  // 1 Hz update rate for testing
 }

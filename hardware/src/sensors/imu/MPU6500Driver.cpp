@@ -1,0 +1,283 @@
+/**
+ * @file MPU6500Driver.cpp
+ * @brief Implementation of MPU6500 6-axis IMU driver
+ *
+ * @date November 17, 2025
+ * @version 1.0
+ */
+
+#include "MPU6500Driver.h"
+
+/**
+ * Constructor
+ */
+MPU6500Driver::MPU6500Driver(uint8_t i2cAddr)
+    : mpu(i2cAddr)
+    , initialized(false)
+    , calibrated(false)
+{
+    // Initialize calibration data
+    calibData.accelOffset = {0.0f, 0.0f, 0.0f};
+    calibData.gyroOffset = {0.0f, 0.0f, 0.0f};
+    calibData.valid = false;
+}
+
+/**
+ * Initialize IMU sensor
+ */
+bool MPU6500Driver::begin() {
+    Logger& log = Logger::getInstance();
+    char buf[128];
+
+    log.info("MPU6500", "Initializing 6-axis IMU...");
+
+    // ✅ Step 1: Initialize I2C with config.h constants (not hardcoded!)
+    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+    Wire.setClock(I2C_CLOCK_HZ);
+    sprintf(buf, "I2C initialized (SDA=%d, SCL=%d, %d Hz)", I2C_SDA_PIN, I2C_SCL_PIN, I2C_CLOCK_HZ);
+    log.info("MPU6500", buf);
+
+    delay(100);  // Give I2C bus time to stabilize
+
+    // ✅ Step 2: Check if device responds at I2C address
+    Wire.beginTransmission(MPU6500_I2C_ADDR);
+    byte error = Wire.endTransmission();
+    if (error != 0) {
+        { char b[64]; sprintf(b, "No response at 0x%02X (error: %d)", MPU6500_I2C_ADDR, error); log.error("MPU6500", b); }
+        return false;
+    }
+    { char b[64]; sprintf(b, "Device responds at 0x%02X", MPU6500_I2C_ADDR); log.debug("MPU6500", b); }
+
+    // ✅ Step 3: Initialize MPU6500 (WHO_AM_I check: 0x70)
+    if (!mpu.init()) {
+        log.error("MPU6500", "init() failed (WHO_AM_I check)");
+        { char b[64]; sprintf(b, "Expected WHO_AM_I: 0x70, got: 0x%02X", mpu.whoAmI()); log.error("MPU6500", b); }
+        return false;
+    }
+    { char b[64]; sprintf(b, "WHO_AM_I: 0x%02X (MPU6500 confirmed)", mpu.whoAmI()); log.info("MPU6500", b); }
+
+    // ✅ Step 4: Configure sensor ranges (from config.h, not hardcoded!)
+    // Accel range: ±4g (covers vehicle dynamics: ±2g typical, 4g for hard braking)
+    if (IMU_ACCEL_RANGE_G == 2) {
+        mpu.setAccRange(MPU9250_ACC_RANGE_2G);
+    } else if (IMU_ACCEL_RANGE_G == 4) {
+        mpu.setAccRange(MPU9250_ACC_RANGE_4G);
+    } else if (IMU_ACCEL_RANGE_G == 8) {
+        mpu.setAccRange(MPU9250_ACC_RANGE_8G);
+    } else {
+        mpu.setAccRange(MPU9250_ACC_RANGE_16G);
+    }
+
+    // Gyro range: ±500 deg/s (covers aggressive turns: ~200 deg/s max)
+    if (IMU_GYRO_RANGE_DPS == 250) {
+        mpu.setGyrRange(MPU9250_GYRO_RANGE_250);
+    } else if (IMU_GYRO_RANGE_DPS == 500) {
+        mpu.setGyrRange(MPU9250_GYRO_RANGE_500);
+    } else if (IMU_GYRO_RANGE_DPS == 1000) {
+        mpu.setGyrRange(MPU9250_GYRO_RANGE_1000);
+    } else {
+        mpu.setGyrRange(MPU9250_GYRO_RANGE_2000);
+    }
+
+    sprintf(buf, "Ranges: ±%dg accel, ±%d°/s gyro", IMU_ACCEL_RANGE_G, IMU_GYRO_RANGE_DPS);
+    log.info("MPU6500", buf);
+
+    // ✅ Step 5: Enable digital low-pass filters (reduce noise)
+    mpu.enableAccDLPF(true);
+    mpu.setAccDLPF(MPU9250_DLPF_6);  // 5 Hz bandwidth (from config.h)
+    mpu.enableGyrDLPF();
+    mpu.setGyrDLPF(MPU9250_DLPF_6);  // 5 Hz bandwidth
+    sprintf(buf, "DLPF enabled: %d Hz bandwidth", IMU_DLPF_BANDWIDTH_HZ);
+    log.debug("MPU6500", buf);
+
+    // ✅ Step 6: Set sample rate to match IMU_SAMPLE_RATE_HZ
+    // Formula: Output rate = 1000 Hz / (1 + divider)
+    // For 10 Hz: divider = (1000 / 10) - 1 = 99
+    mpu.setSampleRateDivider(IMU_SAMPLE_RATE_DIV);
+    sprintf(buf, "Sample rate: %d Hz (divider: %d)", IMU_SAMPLE_RATE_HZ, IMU_SAMPLE_RATE_DIV);
+    log.info("MPU6500", buf);
+
+    // ✅ Step 7: Load calibration from NVS if exists
+    if (loadCalibration()) {
+        log.info("MPU6500", "✅ Calibration loaded from NVS");
+        calibrated = true;
+    } else {
+        log.warning("MPU6500", "⚠️  No calibration found - sensor NOT calibrated");
+        log.warning("MPU6500", "⚠️  Call calibrate() or press BOOT button to calibrate");
+        calibrated = false;
+    }
+
+    initialized = true;
+    log.info("MPU6500", "✅ Initialization complete");
+    return true;
+}
+
+/**
+ * Read current IMU measurements
+ */
+IImuSensor::ImuData MPU6500Driver::read() {
+    ImuData data;
+
+    if (!initialized) {
+        Logger::getInstance().error("MPU6500", "read() called before begin()!");
+        return data;  // Return zeros
+    }
+
+    // Read from library
+    xyzFloat gValue = mpu.getGValues();      // g-force (library output)
+    xyzFloat gyr = mpu.getGyrValues();       // deg/s (library output)
+
+    // ✅ Convert to standard units (g → m/s², deg/s → rad/s)
+    data.accel[0] = gValue.x * 9.80665f;    // Forward axis
+    data.accel[1] = gValue.y * 9.80665f;    // Left axis
+    data.accel[2] = gValue.z * 9.80665f;    // Up axis
+
+    data.gyro[0] = gyr.x * DEG_TO_RAD;      // Roll rate
+    data.gyro[1] = gyr.y * DEG_TO_RAD;      // Pitch rate
+    data.gyro[2] = gyr.z * DEG_TO_RAD;      // Yaw rate
+
+    // ⚠️ CRITICAL: MPU6500 has NO magnetometer - always return zeros
+    data.mag[0] = 0.0f;
+    data.mag[1] = 0.0f;
+    data.mag[2] = 0.0f;
+
+    data.timestamp = millis();
+
+    return data;
+}
+
+/**
+ * Perform accel/gyro offset calibration
+ */
+bool MPU6500Driver::calibrate() {
+    Logger& log = Logger::getInstance();
+
+    if (!initialized) {
+        log.error("MPU6500", "calibrate() called before begin()!");
+        return false;
+    }
+
+    // ⚠️ INTERFACE NOTE: IImuSensor::calibrate() was designed for magnetometer
+    // (figure-8 pattern), but MPU6500 has NO magnetometer.
+    log.warning("MPU6500", "⚠️  Calibrating accel/gyro only (no magnetometer)");
+    log.info("MPU6500", "Place sensor FLAT and STATIONARY");
+    log.info("MPU6500", "Calibrating in 3 seconds...");
+
+    delay(3000);
+
+    // ✅ Use library's autoOffsets() - measures noise floor while stationary
+    // Takes ~500ms (500 samples @ 1ms intervals)
+    log.info("MPU6500", "Running auto-calibration...");
+    mpu.autoOffsets();
+    log.info("MPU6500", "✅ Auto-offsets complete");
+
+    // ✅ CRITICAL: Extract offsets from sensor after autoOffsets()
+    calibData.accelOffset = mpu.getAccOffsets();
+    calibData.gyroOffset = mpu.getGyrOffsets();
+    calibData.valid = true;
+    calibrated = true;
+
+    // Defensive: ensure offsets are applied immediately
+    applyCalibration();
+
+    char buf[128];
+    sprintf(buf, "Accel offsets: %.2f, %.2f, %.2f",
+            calibData.accelOffset.x, calibData.accelOffset.y, calibData.accelOffset.z);
+    log.debug("MPU6500", buf);
+    sprintf(buf, "Gyro offsets: %.2f, %.2f, %.2f",
+            calibData.gyroOffset.x, calibData.gyroOffset.y, calibData.gyroOffset.z);
+    log.debug("MPU6500", buf);
+
+    // Save to NVS
+    bool saved = saveCalibration();
+    if (saved) {
+        log.info("MPU6500", "✅ Calibration saved to NVS");
+    } else {
+        log.error("MPU6500", "❌ Failed to save calibration to NVS");
+    }
+
+    return saved;
+}
+
+/**
+ * Load calibration data from NVS
+ */
+bool MPU6500Driver::loadCalibration() {
+    Preferences prefs;
+    prefs.begin("mpu6500", true);  // Read-only mode
+
+    calibData.valid = prefs.getBool("valid", false);
+
+    if (calibData.valid) {
+        // Load offsets from NVS
+        size_t accelSize = prefs.getBytes("accel_off", &calibData.accelOffset, sizeof(xyzFloat));
+        size_t gyroSize = prefs.getBytes("gyro_off", &calibData.gyroOffset, sizeof(xyzFloat));
+
+        if (accelSize != sizeof(xyzFloat) || gyroSize != sizeof(xyzFloat)) {
+            Logger::getInstance().error("MPU6500", "Calibration data corrupted in NVS");
+            calibData.valid = false;
+            prefs.end();
+            return false;
+        }
+
+        // ✅ CRITICAL: Apply offsets to sensor registers!
+        // Without this, loaded calibration is NOT active!
+        applyCalibration();
+
+        char buf[128];
+        sprintf(buf, "Loaded accel offsets: %.2f, %.2f, %.2f",
+                calibData.accelOffset.x, calibData.accelOffset.y, calibData.accelOffset.z);
+        Logger::getInstance().debug("MPU6500", buf);
+        sprintf(buf, "Loaded gyro offsets: %.2f, %.2f, %.2f",
+                calibData.gyroOffset.x, calibData.gyroOffset.y, calibData.gyroOffset.z);
+        Logger::getInstance().debug("MPU6500", buf);
+    }
+
+    prefs.end();
+    return calibData.valid;
+}
+
+/**
+ * Save calibration data to NVS
+ */
+bool MPU6500Driver::saveCalibration() {
+    if (!calibData.valid) {
+        Logger::getInstance().error("MPU6500", "Cannot save invalid calibration");
+        return false;
+    }
+
+    Preferences prefs;
+    prefs.begin("mpu6500", false);  // Read-write mode
+
+    prefs.putBool("valid", true);
+    prefs.putBytes("accel_off", &calibData.accelOffset, sizeof(xyzFloat));
+    prefs.putBytes("gyro_off", &calibData.gyroOffset, sizeof(xyzFloat));
+
+    prefs.end();
+    return true;
+}
+
+/**
+ * Check if sensor is calibrated
+ */
+bool MPU6500Driver::isCalibrated() const {
+    // Returns true after accel/gyro calibration
+    // NOTE: Does NOT wait for magnetometer (which doesn't exist on MPU6500)
+    return calibrated;
+}
+
+/**
+ * Apply loaded calibration offsets to sensor
+ */
+void MPU6500Driver::applyCalibration() {
+    if (!calibData.valid) {
+        return;
+    }
+
+    // ✅ CRITICAL: Write offsets to sensor registers
+    // This is what actually applies the calibration!
+    mpu.setAccOffsets(calibData.accelOffset);
+    mpu.setGyrOffsets(calibData.gyroOffset);
+
+    Logger::getInstance().debug("MPU6500", "✅ Calibration offsets applied to sensor");
+}
