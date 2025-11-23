@@ -1,0 +1,134 @@
+/***************************************************************************
+ * MPU6500Driver Test Firmware
+ *
+ * Tests the production MPU6500Driver implementation:
+ * 1. Initialize driver (begin())
+ * 2. Read accel/gyro/mag data (read())
+ * 3. Display formatted output every 1 second
+ *
+ * To activate: Rename to main.cpp and flash to ESP32
+ ***************************************************************************/
+
+#include <Arduino.h>
+#include "sensors/imu/MPU6500Driver.h"
+#include "utils/Logger.h"
+#include "config.h"
+
+// Create IMU driver instance
+MPU6500Driver imu;
+bool buttonHandled = false;
+
+void setup() {
+    // Initialize logger
+    Logger& log = Logger::getInstance();
+    log.begin(SERIAL_BAUD_RATE);
+    log.setLogLevel(LOG_DEBUG);
+
+    pinMode(BUTTON_CALIB_PIN, INPUT_PULLUP);
+
+    delay(2000);  // Give serial time to connect
+
+    log.info("TEST", "========================================");
+    log.info("TEST", "MPU6500Driver Test Firmware");
+    log.info("TEST", String("Vehicle ID: ") + VEHICLE_ID);
+    log.info("TEST", "========================================");
+
+    // Initialize IMU
+    log.info("TEST", "Initializing MPU6500Driver...");
+    if (!imu.begin()) {
+        log.error("TEST", "❌ IMU initialization FAILED!");
+        log.error("TEST", String("Check wiring: SDA=") + I2C_SDA_PIN + ", SCL=" + I2C_SCL_PIN);
+        log.error("TEST", "HALTING");
+        while (1) {
+            delay(1000);
+        }
+    }
+
+    log.info("TEST", "✅ IMU initialized successfully");
+    log.info("TEST", String("Sensor: ") + imu.getName());
+    log.info("TEST", "Starting accel/gyro calibration (keep flat & still)...");
+    if (imu.calibrate()) {
+        log.info("TEST", "✅ Calibration complete");
+    } else {
+        log.warning("TEST", "⚠️ Calibration failed or skipped");
+    }
+    log.info("TEST", String("Calibrated: ") + (imu.isCalibrated() ? "YES" : "NO"));
+
+    if (!imu.isCalibrated()) {
+        log.warning("TEST", "⚠️  Sensor NOT calibrated!");
+        log.warning("TEST", "⚠️  Hold BOOT button (GPIO 0) during next boot to calibrate");
+        log.warning("TEST", "⚠️  (Feature to be implemented in final firmware)\n");
+    }
+
+    log.info("TEST", "Starting sensor readings...\n");
+}
+
+void loop() {
+    // Read IMU data
+    IImuSensor::ImuData data = imu.read();
+
+    // Display header
+    Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    // Accelerometer
+    Serial.println("[ACCEL] Accelerometer (m/s²):");
+    Serial.printf("  X: %7.2f  Y: %7.2f  Z: %7.2f\n",
+                  data.accel[0], data.accel[1], data.accel[2]);
+
+    // Expected: Z ≈ 9.81 when flat, X/Y ≈ 0
+    if (abs(data.accel[2] - 9.81) < 1.0 && abs(data.accel[0]) < 1.0 && abs(data.accel[1]) < 1.0) {
+        Serial.println("  Status: ✅ GOOD (sensor flat)");
+    } else {
+        Serial.println("  Status: ⚠️  Sensor tilted or moving");
+    }
+
+    // Gyroscope
+    Serial.println("\n[GYRO] Gyroscope (rad/s):");
+    Serial.printf("  X: %7.3f  Y: %7.3f  Z: %7.3f\n",
+                  data.gyro[0], data.gyro[1], data.gyro[2]);
+
+    // Expected: ~0.000 when stationary
+    float gyroMagnitude = sqrt(data.gyro[0]*data.gyro[0] +
+                                data.gyro[1]*data.gyro[1] +
+                                data.gyro[2]*data.gyro[2]);
+    if (gyroMagnitude < 0.1) {
+        Serial.println("  Status: ✅ GOOD (sensor stationary)");
+    } else {
+        Serial.println("  Status: ⚠️  Sensor rotating");
+    }
+
+    // Magnetometer (always zero)
+    Serial.println("\n[MAG] Magnetometer (µT):");
+    Serial.printf("  X: %7.2f  Y: %7.2f  Z: %7.2f\n",
+                  data.mag[0], data.mag[1], data.mag[2]);
+    Serial.println("  Status: ⚠️  ZEROS (MPU6500 has no magnetometer - expected)");
+
+    // Timestamp
+    Serial.printf("\n[TIME] Timestamp: %lu ms\n", data.timestamp);
+
+    // Overall status
+    Serial.println("\n[STATUS] Overall:");
+    if (imu.isCalibrated()) {
+        Serial.println("  Calibration: ✅ Calibrated");
+    } else {
+        Serial.println("  Calibration: ⚠️  NOT calibrated (offsets may be inaccurate)");
+    }
+
+    Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+    // Trigger calibration if BOOT button pressed (active low)
+    if (digitalRead(BUTTON_CALIB_PIN) == LOW && !buttonHandled) {
+        Serial.println("[CAL ] Button pressed - starting calibration...");
+        if (imu.calibrate()) {
+            Serial.println("[CAL ] ✅ Calibration complete");
+        } else {
+            Serial.println("[CAL ] ⚠️ Calibration failed or skipped");
+        }
+        buttonHandled = true;
+    }
+    if (digitalRead(BUTTON_CALIB_PIN) == HIGH) {
+        buttonHandled = false;
+    }
+
+    delay(2000);  // ~0.5 Hz update rate for easier observation
+}

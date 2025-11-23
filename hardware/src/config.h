@@ -35,8 +35,9 @@
 #define MPU6500_I2C_ADDR  0x68    // MPU6500 I2C address (WHO_AM_I: 0x70)
 
 // NEO-6M GPS (UART)
-#define GPS_RX_PIN        16    // ESP32 RX ← GPS TX
-#define GPS_TX_PIN        17    // ESP32 TX → GPS RX
+#define GPS_SERIAL_PORT   1       // Serial1 (UART1)
+#define GPS_RX_PIN        16      // ESP32 RX ← GPS TX
+#define GPS_TX_PIN        17      // ESP32 TX → GPS RX
 #define GPS_BAUD_RATE     9600
 
 // Status LED
@@ -62,6 +63,9 @@
 // GPS sampling rate
 #define GPS_SAMPLE_RATE_HZ      1     // 1 Hz = 1000ms interval
 #define GPS_CACHE_TIMEOUT_MS    30000 // 30 seconds
+
+// GPS heading validity (replaces magnetometer heading - MPU6500 has no compass)
+#define GPS_HEADING_MIN_SPEED_MPS  1.4f  // ~5 km/h (below this, heading unreliable)
 
 // ⚠️ Magnetometer calibration NOT APPLICABLE (MPU6500 has no magnetometer)
 // GPS heading used instead of compass heading
