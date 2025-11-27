@@ -1,6 +1,5 @@
 # Hardware build artifacts
 hardware/.pio/
-hardware/lib/
 *.bin
 *.elf
 
