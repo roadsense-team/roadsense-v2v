@@ -1,0 +1,17 @@
+#include <Arduino.h>
+#include "sensors/imu/MPU6500Driver.h"
+#include "utils/Logger.h"
+#include "config.h"
+
+MPU6500Driver imu;
+
+void setup() {
+    Logger& log = Logger::getInstance();
+    log.begin(SERIAL_BAUD_RATE);
+    log.setLogLevel(LOG_INFO);
+    delay(2000);
+    if (!imu.begin()) {log.error("IMU", "Failed to initialize MPU6500 IMU sensor"); return;}
+    log.info("MAIN","Calibrating IMU sensor, please keep the device stationary...");
+    bool ok = imu.calibrate();
+    log.info("MAIN", ok ? "IMU calibration stored in NVS" : "IMU calibration failed");}
+void loop() {}

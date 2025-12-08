@@ -19,6 +19,7 @@
 #include "sensors/gps/NEO6M_Driver.h"
 #include "network/transport/EspNowTransport.h"
 #include "network/protocol/V2VMessage.h"
+#include "logging/DataLogger.h"
 
 // ============================================================================
 // GLOBAL OBJECTS
@@ -26,14 +27,80 @@
 MPU6500Driver imu;
 NEO6M_Driver gps;
 EspNowTransport transport;
+DataLogger dataLogger;
 
 // Timer variables
 uint32_t lastBroadcastTime = 0;
 uint32_t lastPrintTime = 0;
+uint32_t lastButtonCheck = 0;
+
+// Button state
+bool lastButtonState = HIGH;
+uint32_t lastButtonPress = 0;
+const uint32_t BUTTON_DEBOUNCE_MS = 500;
 
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+/**
+ * @brief Update LED based on system state
+ */
+void updateLED() {
+    static uint32_t lastLedToggle = 0;
+    static bool ledState = false;
+    uint32_t now = millis();
+
+    auto gpsData = gps.read();
+
+    if (dataLogger.isLogging()) {
+        // Solid ON when logging
+        digitalWrite(LED_STATUS_PIN, HIGH);
+    } else if (!gpsData.valid && !gpsData.cached) {
+        // Fast blink when waiting for GPS fix (200ms)
+        if (now - lastLedToggle >= 200) {
+            ledState = !ledState;
+            digitalWrite(LED_STATUS_PIN, ledState);
+            lastLedToggle = now;
+        }
+    } else {
+        // OFF when not logging and GPS ready
+        digitalWrite(LED_STATUS_PIN, LOW);
+    }
+}
+
+/**
+ * @brief Handle button press (start/stop logging)
+ */
+void handleButton() {
+    uint32_t now = millis();
+    bool buttonState = digitalRead(BUTTON_CALIB_PIN);
+
+    // Debounce check
+    if (buttonState == LOW && lastButtonState == HIGH) {
+        if (now - lastButtonPress > BUTTON_DEBOUNCE_MS) {
+            lastButtonPress = now;
+
+            // Toggle logging
+            auto gpsData = gps.read();
+            if (dataLogger.isLogging()) {
+                // Stop logging
+                dataLogger.stopLogging();
+                Logger::getInstance().info("MAIN", "📝 Logging STOPPED");
+            } else {
+                // Start logging
+                bool gpsReady = gpsData.valid || gpsData.cached;
+                if (dataLogger.startLogging(VEHICLE_ID, gpsReady)) {
+                    Logger::getInstance().info("MAIN", "📝 Logging STARTED (Session " + String(dataLogger.getSessionNumber()) + ")");
+                } else {
+                    Logger::getInstance().error("MAIN", "❌ Failed to start logging");
+                }
+            }
+        }
+    }
+
+    lastButtonState = buttonState;
+}
 
 /**
  * @brief Populate V2VMessage with current sensor data
@@ -105,13 +172,19 @@ void setup() {
     Logger& log = Logger::getInstance();
     log.begin(115200);
     log.setLogLevel(LOG_INFO);
-    
+
     delay(1000); // Stability delay
-    
+
     log.info("MAIN", "═══════════════════════════════════");
     log.info("MAIN", "  RoadSense V2V Unified Firmware");
     log.info("MAIN", "  Vehicle ID: " + String(VEHICLE_ID));
     log.info("MAIN", "═══════════════════════════════════");
+
+    // 1.5. Initialize GPIO
+    pinMode(BUTTON_CALIB_PIN, INPUT_PULLUP);
+    pinMode(LED_STATUS_PIN, OUTPUT);
+    digitalWrite(LED_STATUS_PIN, LOW);
+    log.info("MAIN", "GPIO initialized: Button=" + String(BUTTON_CALIB_PIN) + ", LED=" + String(LED_STATUS_PIN));
 
     // 2. Initialize Sensors
     log.info("MAIN", "Initializing Sensors...");
@@ -143,7 +216,17 @@ void setup() {
     
     transport.onReceive(onDataReceived);
     log.info("MAIN", "✅ Network Initialized (ESP-NOW)");
-    
+
+    // 4. Initialize DataLogger
+    log.info("MAIN", "Initializing SD Card...");
+    if (!dataLogger.begin()) {
+        log.error("MAIN", "❌ SD Card Initialization FAILED!");
+        log.error("MAIN", "Data logging disabled (system will still function)");
+    } else {
+        log.info("MAIN", "✅ SD Card Initialized (Session " + String(dataLogger.getSessionNumber() + 1) + " ready)");
+        log.info("MAIN", "Press button (GPIO " + String(BUTTON_CALIB_PIN) + ") to start/stop logging");
+    }
+
     log.info("MAIN", "✅ System Ready. Broadcasting at 10Hz.");
 }
 
@@ -152,42 +235,59 @@ void setup() {
 // ============================================================================
 void loop() {
     uint32_t now = millis();
-    
-    // 1. Update Sensors (High Frequency polling)
+
+    // 1. Handle button input
+    handleButton();
+
+    // 2. Update LED feedback
+    updateLED();
+
+    // 3. Update Sensors (High Frequency polling)
     gps.update(); // Drains UART buffer
     // imu.update() is not needed, we poll via read()
-    
-    // 2. Broadcast V2V Message (10 Hz)
+
+    // 4. Broadcast V2V Message (10 Hz) + Log if active
     if (now - lastBroadcastTime >= 100) {
         V2VMessage msg = buildV2VMessage();
-        
+
         // Send broadcast (to FF:FF:FF:FF:FF:FF)
         bool success = transport.send((uint8_t*)&msg, sizeof(msg));
-        
+
         if (!success) {
             // Logger::getInstance().warning("V2V", "Send failed");
         }
-        
+
+        // Log sample if logging active
+        if (dataLogger.isLogging()) {
+            auto gpsData = gps.read();
+            dataLogger.logSample(msg, gpsData);
+        }
+
         lastBroadcastTime = now;
     }
     
-    // 3. Debug Print (1 Hz)
+    // 5. Debug Print (1 Hz)
     if (now - lastPrintTime >= 1000) {
-        // Blink LED if available
-        #ifdef LED_BUILTIN
-        digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-        #endif
-        
         IGpsSensor::GpsData gpsInfo = gps.read();
-        
+
+        String statusMsg = "";
+
         if (gpsInfo.valid || gpsInfo.cached) {
-             Logger::getInstance().info("STATUS", 
-                "GPS Fix: YES | Sats: " + String(gpsInfo.satellites) + 
-                " | Speed: " + String(gpsInfo.speed) + " m/s");
+            statusMsg = "GPS Fix: YES | Sats: " + String(gpsInfo.satellites) +
+                       " | Speed: " + String(gpsInfo.speed) + " m/s";
         } else {
-             Logger::getInstance().info("STATUS", "GPS Fix: NO  | Searching...");
+            statusMsg = "GPS Fix: NO  | Searching...";
         }
-        
+
+        // Add logging status
+        if (dataLogger.isLogging()) {
+            statusMsg += " | 📝 LOGGING (" + String(dataLogger.getRowCount()) + " rows)";
+        } else {
+            statusMsg += " | ⏸ Not logging";
+        }
+
+        Logger::getInstance().info("STATUS", statusMsg);
+
         lastPrintTime = now;
     }
 }

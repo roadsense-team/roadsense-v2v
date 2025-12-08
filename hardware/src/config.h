@@ -44,7 +44,15 @@
 #define LED_STATUS_PIN    2     // Built-in LED on most ESP32 boards
 
 // Calibration button
-#define BUTTON_CALIB_PIN  0     // BOOT button (GPIO 0)
+// ⚠️ Changed from GPIO 0 to GPIO 4 (GPIO 0 is strapping pin - causes boot issues)
+#define BUTTON_CALIB_PIN  4     // Data logging start/stop button
+
+// SD Card (SPI)
+#define SD_CS_PIN         5     // Chip Select
+#define SD_MOSI_PIN       23    // Master Out Slave In
+#define SD_MISO_PIN       19    // Master In Slave Out
+#define SD_SCK_PIN        18    // Serial Clock
+#define SD_SPI_MHZ        25    // SPI clock speed (25 MHz)
 
 // ============================================================================
 // SENSOR CONFIGURATION
@@ -94,6 +102,22 @@
 #define PACKAGE_TIMEOUT_MS      60000   // 60 seconds (message expiry)
 #define MAX_PACKAGES_PER_SOURCE 3       // Limit packages per source MAC
 #define MAX_TRACKED_MACS        20      // Maximum unique MAC addresses to track (3 vehicles × 3 = 9 expected, 20 allows safety margin)
+
+// ============================================================================
+// DATA LOGGING CONFIGURATION
+// ============================================================================
+
+// SD card logging settings
+#define LOG_DIRECTORY         "/roadsense"  // Root directory for log files
+#define LOG_FILE_PREFIX       ""             // Filename format: V001_session_001.csv
+#define LOG_BUFFER_ROWS       10             // Buffer 10 rows before flushing (1 second at 10Hz)
+#define LOG_FLUSH_INTERVAL_MS 1000           // Force flush every 1 second
+#define LOG_ROW_SIZE_BYTES    220            // CSV row size with 10% safety margin
+#define MAX_WRITE_FAILURES    3              // Auto-stop logging after N consecutive write failures
+
+// Session management (stored in NVS)
+#define NVS_NAMESPACE         "roadsense"
+#define NVS_SESSION_KEY       "session_num"
 
 // ============================================================================
 // MACHINE LEARNING CONFIGURATION
