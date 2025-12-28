@@ -9,15 +9,20 @@
 
 // Constructor
 DataLogger::DataLogger()
-    : m_isLogging(false),
+    : m_mode(MODE_NETWORK_CHARACTERIZATION),  // Default to Mode 1 (characterization first!)
+      m_isLogging(false),
       m_sdInitialized(false),
       m_sessionNum(0),
       m_bufferOffset(0),
       m_bufferRowCount(0),
       m_totalRows(0),
       m_lastFlushTime(0),
+      m_txCount(0),
+      m_rxCount(0),
       m_consecutiveWriteFailures(0) {
     memset(m_filename, 0, sizeof(m_filename));
+    memset(m_txFilename, 0, sizeof(m_txFilename));
+    memset(m_rxFilename, 0, sizeof(m_rxFilename));
     memset(m_csvBuffer, 0, sizeof(m_csvBuffer));
 }
 
@@ -193,14 +198,24 @@ bool DataLogger::stopLogging() {
         return true;
     }
 
-    // Flush remaining buffer
-    flush();
+    // Mode 2: Flush buffer and close single file
+    if (m_mode == MODE_TRAINING_DATA) {
+        flush();
+        m_logFile.close();
+        Logger::getInstance().info("DataLogger", "✅ Logging stopped: " + String(m_totalRows) + " rows");
+    }
 
-    // Close file
-    m_logFile.close();
+    // Mode 1: Close TX and RX files
+    if (m_mode == MODE_NETWORK_CHARACTERIZATION) {
+        m_txLogFile.close();
+        m_rxLogFile.close();
+        Logger::getInstance().info("DataLogger",
+            "✅ Network characterization stopped: TX=" + String(m_txCount) +
+            " RX=" + String(m_rxCount) +
+            " Loss=" + String(100.0 * (1.0 - float(m_rxCount) / float(m_txCount > 0 ? m_txCount : 1))) + "%");
+    }
+
     m_isLogging = false;
-
-    Logger::getInstance().info("DataLogger", "✅ Logging stopped: " + String(m_totalRows) + " rows");
     return true;
 }
 
@@ -312,4 +327,198 @@ void DataLogger::incrementSessionNumber() {
     m_sessionNum++;
     m_nvs.putUShort(NVS_SESSION_KEY, m_sessionNum);
     Logger::getInstance().info("DataLogger", "Session number incremented: " + String(m_sessionNum));
+}
+
+// ============================================================================
+// MODE 1: NETWORK CHARACTERIZATION METHODS
+// ============================================================================
+
+// Start network characterization logging
+bool DataLogger::startCharacterizationLogging(const char* vehicleId) {
+    Logger& log = Logger::getInstance();
+
+    if (!m_sdInitialized) {
+        log.error("DataLogger", "SD card not initialized");
+        return false;
+    }
+
+    if (m_isLogging) {
+        log.warning("DataLogger", "Already logging");
+        return false;
+    }
+
+    if (m_mode != MODE_NETWORK_CHARACTERIZATION) {
+        log.error("DataLogger", "Wrong mode! Call setMode(MODE_NETWORK_CHARACTERIZATION) first");
+        return false;
+    }
+
+    // Create TX and RX log files
+    if (!createCharacterizationFiles(vehicleId)) {
+        return false;
+    }
+
+    // Write headers
+    if (!writeTxHeader() || !writeRxHeader()) {
+        m_txLogFile.close();
+        m_rxLogFile.close();
+        return false;
+    }
+
+    // Reset counters
+    m_txCount = 0;
+    m_rxCount = 0;
+    m_consecutiveWriteFailures = 0;
+    m_isLogging = true;
+
+    log.info("DataLogger", "✅ Network characterization logging started");
+    log.info("DataLogger", "  TX Log: " + String(m_txFilename));
+    log.info("DataLogger", "  RX Log: " + String(m_rxFilename));
+
+    return true;
+}
+
+// Log transmitted message (Mode 1)
+void DataLogger::logTxMessage(const V2VMessage& msg) {
+    if (!m_isLogging || m_mode != MODE_NETWORK_CHARACTERIZATION) {
+        return;
+    }
+
+    unsigned long local_time = millis();
+
+    // Format: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading
+    char row[256];
+    snprintf(row, sizeof(row),
+        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f\n",
+        local_time,
+        msg.timestamp,
+        msg.vehicleId,
+        msg.position.lat,
+        msg.position.lon,
+        msg.dynamics.speed,
+        msg.dynamics.heading
+    );
+
+    // Write immediately (no buffering for characterization - need every sample!)
+    size_t len = strlen(row);
+    size_t written = m_txLogFile.write(row, len);
+
+    if (written != len) {
+        m_consecutiveWriteFailures++;
+        Logger::getInstance().error("DataLogger", "TX write failed");
+        if (m_consecutiveWriteFailures >= MAX_WRITE_FAILURES) {
+            Logger::getInstance().error("DataLogger", "Too many failures - stopping");
+            stopLogging();
+        }
+        return;
+    }
+
+    // Sync every 10 messages (balance between safety and performance)
+    m_txCount++;
+    if (m_txCount % 10 == 0) {
+        m_txLogFile.sync();
+    }
+}
+
+// Log received message (Mode 1)
+void DataLogger::logRxMessage(const V2VMessage& msg) {
+    if (!m_isLogging || m_mode != MODE_NETWORK_CHARACTERIZATION) {
+        return;
+    }
+
+    unsigned long local_time = millis();
+
+    // Format: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading
+    char row[256];
+    snprintf(row, sizeof(row),
+        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f\n",
+        local_time,
+        msg.timestamp,
+        msg.vehicleId,  // Sender's ID
+        msg.position.lat,
+        msg.position.lon,
+        msg.dynamics.speed,
+        msg.dynamics.heading
+    );
+
+    // Write immediately
+    size_t len = strlen(row);
+    size_t written = m_rxLogFile.write(row, len);
+
+    if (written != len) {
+        m_consecutiveWriteFailures++;
+        Logger::getInstance().error("DataLogger", "RX write failed");
+        if (m_consecutiveWriteFailures >= MAX_WRITE_FAILURES) {
+            Logger::getInstance().error("DataLogger", "Too many failures - stopping");
+            stopLogging();
+        }
+        return;
+    }
+
+    // Sync every 10 messages
+    m_rxCount++;
+    if (m_rxCount % 10 == 0) {
+        m_rxLogFile.sync();
+    }
+
+    // Reset error counter on success
+    m_consecutiveWriteFailures = 0;
+}
+
+// Create TX and RX log files
+bool DataLogger::createCharacterizationFiles(const char* vehicleId) {
+    Logger& log = Logger::getInstance();
+
+    // Increment session number
+    incrementSessionNumber();
+
+    // Generate filenames: v001_tx.csv, v001_rx.csv
+    snprintf(m_txFilename, sizeof(m_txFilename), "%s/%s_tx_%03d.csv",
+             LOG_DIRECTORY, vehicleId, m_sessionNum);
+    snprintf(m_rxFilename, sizeof(m_rxFilename), "%s/%s_rx_%03d.csv",
+             LOG_DIRECTORY, vehicleId, m_sessionNum);
+
+    // Open TX file
+    if (!m_txLogFile.open(m_txFilename, O_WRONLY | O_CREAT | O_TRUNC)) {
+        log.error("DataLogger", "Failed to create TX file: " + String(m_txFilename));
+        return false;
+    }
+
+    // Open RX file
+    if (!m_rxLogFile.open(m_rxFilename, O_WRONLY | O_CREAT | O_TRUNC)) {
+        log.error("DataLogger", "Failed to create RX file: " + String(m_rxFilename));
+        m_txLogFile.close();
+        return false;
+    }
+
+    return true;
+}
+
+// Write TX log header
+bool DataLogger::writeTxHeader() {
+    const char* header = "timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading\n";
+    size_t len = strlen(header);
+    size_t written = m_txLogFile.write(header, len);
+
+    if (written != len) {
+        Logger::getInstance().error("DataLogger", "Failed to write TX header");
+        return false;
+    }
+
+    m_txLogFile.sync();
+    return true;
+}
+
+// Write RX log header
+bool DataLogger::writeRxHeader() {
+    const char* header = "timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading\n";
+    size_t len = strlen(header);
+    size_t written = m_rxLogFile.write(header, len);
+
+    if (written != len) {
+        Logger::getInstance().error("DataLogger", "Failed to write RX header");
+        return false;
+    }
+
+    m_rxLogFile.sync();
+    return true;
 }
