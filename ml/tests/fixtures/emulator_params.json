@@ -1,0 +1,40 @@
+{
+  "metadata": {
+    "collection_date": "2025-12-26",
+    "duration_minutes": 25,
+    "total_packets": 15000,
+    "firmware_version": "1.0.0"
+  },
+  "latency": {
+    "description": "One-way latency parameters (RTT/2)",
+    "base_ms": 12.0,
+    "distance_factor": 0.15,
+    "jitter_std_ms": 8.0
+  },
+  "packet_loss": {
+    "description": "Packet loss characteristics",
+    "base_rate": 0.02,
+    "distance_threshold_1": 50,
+    "distance_threshold_2": 100,
+    "rate_tier_1": 0.05,
+    "rate_tier_2": 0.15,
+    "rate_tier_3": 0.40
+  },
+  "burst_loss": {
+    "description": "Burst loss parameters",
+    "enabled": true,
+    "mean_burst_length": 1.8
+  },
+  "sensor_noise": {
+    "description": "Sensor noise parameters (optional)",
+    "gps_std_m": 5.0,
+    "speed_std_ms": 0.5,
+    "accel_std_ms2": 0.2,
+    "heading_std_deg": 3.0
+  },
+  "domain_randomization": {
+    "description": "Wider ranges for robust training",
+    "latency_range_ms": [5, 80],
+    "loss_rate_range": [0.0, 0.20]
+  }
+}
