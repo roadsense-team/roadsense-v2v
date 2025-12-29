@@ -19,8 +19,8 @@
  *
  * File Format (Mode 1 - Network Characterization):
  * -------------------------------------------------
- * TX Log: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading
- * RX Log: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading
+ * TX Log: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
+ * RX Log: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
  *
  * File Format (Mode 2 - Training Data):
  * --------------------------------------

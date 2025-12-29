@@ -385,17 +385,20 @@ void DataLogger::logTxMessage(const V2VMessage& msg) {
 
     unsigned long local_time = millis();
 
-    // Format: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading
+    // Format: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
     char row[256];
     snprintf(row, sizeof(row),
-        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f\n",
+        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f\n",
         local_time,
         msg.timestamp,
         msg.vehicleId,
         msg.position.lat,
         msg.position.lon,
         msg.dynamics.speed,
-        msg.dynamics.heading
+        msg.dynamics.heading,
+        msg.sensors.accel[0],
+        msg.sensors.accel[1],
+        msg.sensors.accel[2]
     );
 
     // Write immediately (no buffering for characterization - need every sample!)
@@ -427,17 +430,20 @@ void DataLogger::logRxMessage(const V2VMessage& msg) {
 
     unsigned long local_time = millis();
 
-    // Format: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading
+    // Format: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
     char row[256];
     snprintf(row, sizeof(row),
-        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f\n",
+        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f\n",
         local_time,
         msg.timestamp,
         msg.vehicleId,  // Sender's ID
         msg.position.lat,
         msg.position.lon,
         msg.dynamics.speed,
-        msg.dynamics.heading
+        msg.dynamics.heading,
+        msg.sensors.accel[0],
+        msg.sensors.accel[1],
+        msg.sensors.accel[2]
     );
 
     // Write immediately
@@ -495,7 +501,7 @@ bool DataLogger::createCharacterizationFiles(const char* vehicleId) {
 
 // Write TX log header
 bool DataLogger::writeTxHeader() {
-    const char* header = "timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading\n";
+    const char* header = "timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z\n";
     size_t len = strlen(header);
     size_t written = m_txLogFile.write(header, len);
 
@@ -510,7 +516,7 @@ bool DataLogger::writeTxHeader() {
 
 // Write RX log header
 bool DataLogger::writeRxHeader() {
-    const char* header = "timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading\n";
+    const char* header = "timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z\n";
     size_t len = strlen(header);
     size_t written = m_rxLogFile.write(header, len);
 
