@@ -292,9 +292,14 @@ void loop() {
             statusMsg = "GPS Fix: NO  | Searching...";
         }
 
-        // Add logging status
+        // Add logging status (show TX/RX counts for Mode 1)
         if (dataLogger.isLogging()) {
-            statusMsg += " | 📝 LOGGING (" + String(dataLogger.getRowCount()) + " rows)";
+            if (dataLogger.getMode() == MODE_NETWORK_CHARACTERIZATION) {
+                statusMsg += " | 📝 LOGGING (TX:" + String(dataLogger.getTxCount()) +
+                             " RX:" + String(dataLogger.getRxCount()) + ")";
+            } else {
+                statusMsg += " | 📝 LOGGING (" + String(dataLogger.getRowCount()) + " rows)";
+            }
         } else {
             statusMsg += " | ⏸ Not logging";
         }

@@ -175,10 +175,22 @@ public:
     uint16_t getSessionNumber() const { return m_sessionNum; }
 
     /**
-     * @brief Get total rows logged in current session
+     * @brief Get total rows logged in current session (Mode 2)
      * @return Row count
      */
     uint32_t getRowCount() const { return m_totalRows; }
+
+    /**
+     * @brief Get TX message count (Mode 1)
+     * @return Number of transmitted messages logged
+     */
+    uint32_t getTxCount() const { return m_txCount; }
+
+    /**
+     * @brief Get RX message count (Mode 1)
+     * @return Number of received messages logged
+     */
+    uint32_t getRxCount() const { return m_rxCount; }
 
 private:
     // SdFat objects
