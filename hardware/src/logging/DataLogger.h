@@ -19,8 +19,8 @@
  *
  * File Format (Mode 1 - Network Characterization):
  * -------------------------------------------------
- * TX Log: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading
- * RX Log: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading
+ * TX Log: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
+ * RX Log: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
  *
  * File Format (Mode 2 - Training Data):
  * --------------------------------------
@@ -101,11 +101,29 @@ public:
     void logTxMessage(const V2VMessage& msg);
 
     /**
-     * @brief Log a received V2V message (Mode 1)
+     * @brief Queue a received V2V message for logging (Mode 1) - ISR SAFE
      * @param msg Message received from ESP-NOW callback
      *
-     * Call this in ESP-NOW receive callback.
-     * Logs: local_timestamp, msg.timestamp, msg.vehicleId (sender), position, speed
+     * Call this in ESP-NOW receive callback. Does NOT write to SD card.
+     * Messages are stored in a lock-free circular buffer.
+     * Call processRxQueue() from main loop to write to SD.
+     */
+    void queueRxMessage(const V2VMessage& msg);
+
+    /**
+     * @brief Process queued RX messages and write to SD card (Mode 1)
+     *
+     * Call this from main loop (NOT from ISR/callback).
+     * Drains the RX queue and writes all pending messages to SD card.
+     */
+    void processRxQueue();
+
+    /**
+     * @brief Log a received V2V message (Mode 1) - INTERNAL USE ONLY
+     * @param msg Message received from ESP-NOW callback
+     *
+     * WARNING: Do NOT call from ISR/callback - use queueRxMessage() instead.
+     * This performs blocking SD card I/O.
      */
     void logRxMessage(const V2VMessage& msg);
 
@@ -157,10 +175,22 @@ public:
     uint16_t getSessionNumber() const { return m_sessionNum; }
 
     /**
-     * @brief Get total rows logged in current session
+     * @brief Get total rows logged in current session (Mode 2)
      * @return Row count
      */
     uint32_t getRowCount() const { return m_totalRows; }
+
+    /**
+     * @brief Get TX message count (Mode 1)
+     * @return Number of transmitted messages logged
+     */
+    uint32_t getTxCount() const { return m_txCount; }
+
+    /**
+     * @brief Get RX message count (Mode 1)
+     * @return Number of received messages logged
+     */
+    uint32_t getRxCount() const { return m_rxCount; }
 
 private:
     // SdFat objects
@@ -195,6 +225,12 @@ private:
     // Statistics (Mode 1 - new)
     uint32_t m_txCount;  // Messages sent
     uint32_t m_rxCount;  // Messages received
+
+    // RX Message Queue (Mode 1 - ISR-safe circular buffer)
+    static const size_t RX_QUEUE_SIZE = 32;  // Buffer ~3 seconds @ 10Hz
+    V2VMessage m_rxQueue[RX_QUEUE_SIZE];
+    volatile size_t m_rxQueueHead;  // Write position (ISR writes here)
+    volatile size_t m_rxQueueTail;  // Read position (main loop reads here)
 
     // Error handling
     uint8_t m_consecutiveWriteFailures;

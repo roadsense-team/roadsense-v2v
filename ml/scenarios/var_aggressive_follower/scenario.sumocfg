@@ -1,0 +1,16 @@
+<configuration>
+      <input>
+          <net-file value="network.net.xml"/>
+          <route-files value="vehicles.rou.xml"/>
+      </input>
+      <time>
+          <begin value="0"/>
+          <end value="120"/>
+          <step-length value="0.1"/>
+      </time>
+      <output>
+          <fcd-output value="fcd_output.csv"/>
+          <fcd-output.geo value="false"/>
+          <fcd-output.acceleration value="true"/>
+      </output>
+</configuration>

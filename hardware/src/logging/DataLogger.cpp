@@ -19,11 +19,14 @@ DataLogger::DataLogger()
       m_lastFlushTime(0),
       m_txCount(0),
       m_rxCount(0),
+      m_rxQueueHead(0),
+      m_rxQueueTail(0),
       m_consecutiveWriteFailures(0) {
     memset(m_filename, 0, sizeof(m_filename));
     memset(m_txFilename, 0, sizeof(m_txFilename));
     memset(m_rxFilename, 0, sizeof(m_rxFilename));
     memset(m_csvBuffer, 0, sizeof(m_csvBuffer));
+    memset(m_rxQueue, 0, sizeof(m_rxQueue));
 }
 
 // Initialize SD card and NVS
@@ -207,6 +210,16 @@ bool DataLogger::stopLogging() {
 
     // Mode 1: Close TX and RX files
     if (m_mode == MODE_NETWORK_CHARACTERIZATION) {
+        // Process any remaining queued RX messages before closing
+        while (m_rxQueueTail != m_rxQueueHead) {
+            logRxMessage(m_rxQueue[m_rxQueueTail]);
+            m_rxQueueTail = (m_rxQueueTail + 1) % RX_QUEUE_SIZE;
+        }
+
+        // Force sync before close to prevent data loss on power-off
+        m_txLogFile.sync();
+        m_rxLogFile.sync();
+
         m_txLogFile.close();
         m_rxLogFile.close();
         Logger::getInstance().info("DataLogger",
@@ -385,17 +398,20 @@ void DataLogger::logTxMessage(const V2VMessage& msg) {
 
     unsigned long local_time = millis();
 
-    // Format: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading
+    // Format: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
     char row[256];
     snprintf(row, sizeof(row),
-        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f\n",
+        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f\n",
         local_time,
         msg.timestamp,
         msg.vehicleId,
         msg.position.lat,
         msg.position.lon,
         msg.dynamics.speed,
-        msg.dynamics.heading
+        msg.dynamics.heading,
+        msg.sensors.accel[0],
+        msg.sensors.accel[1],
+        msg.sensors.accel[2]
     );
 
     // Write immediately (no buffering for characterization - need every sample!)
@@ -427,17 +443,20 @@ void DataLogger::logRxMessage(const V2VMessage& msg) {
 
     unsigned long local_time = millis();
 
-    // Format: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading
+    // Format: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
     char row[256];
     snprintf(row, sizeof(row),
-        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f\n",
+        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f\n",
         local_time,
         msg.timestamp,
         msg.vehicleId,  // Sender's ID
         msg.position.lat,
         msg.position.lon,
         msg.dynamics.speed,
-        msg.dynamics.heading
+        msg.dynamics.heading,
+        msg.sensors.accel[0],
+        msg.sensors.accel[1],
+        msg.sensors.accel[2]
     );
 
     // Write immediately
@@ -462,6 +481,45 @@ void DataLogger::logRxMessage(const V2VMessage& msg) {
 
     // Reset error counter on success
     m_consecutiveWriteFailures = 0;
+}
+
+// Queue received message (ISR-safe, lock-free circular buffer)
+void DataLogger::queueRxMessage(const V2VMessage& msg) {
+    if (!m_isLogging || m_mode != MODE_NETWORK_CHARACTERIZATION) {
+        return;
+    }
+
+    // Calculate next write position
+    size_t nextHead = (m_rxQueueHead + 1) % RX_QUEUE_SIZE;
+
+    // Check if queue is full (would overwrite unread data)
+    if (nextHead == m_rxQueueTail) {
+        // Queue overflow - drop packet (better than blocking in ISR)
+        // Note: Can't safely log here (we're in ISR context)
+        return;
+    }
+
+    // Copy message to queue (fast memcpy, no SD I/O)
+    m_rxQueue[m_rxQueueHead] = msg;
+
+    // Advance write pointer (atomic on ESP32 for size_t)
+    m_rxQueueHead = nextHead;
+}
+
+// Process queued RX messages (call from main loop only!)
+void DataLogger::processRxQueue() {
+    if (!m_isLogging || m_mode != MODE_NETWORK_CHARACTERIZATION) {
+        return;
+    }
+
+    // Process all queued messages
+    while (m_rxQueueTail != m_rxQueueHead) {
+        // Write message to SD card (blocking I/O - safe in main loop)
+        logRxMessage(m_rxQueue[m_rxQueueTail]);
+
+        // Advance read pointer
+        m_rxQueueTail = (m_rxQueueTail + 1) % RX_QUEUE_SIZE;
+    }
 }
 
 // Create TX and RX log files
@@ -495,7 +553,7 @@ bool DataLogger::createCharacterizationFiles(const char* vehicleId) {
 
 // Write TX log header
 bool DataLogger::writeTxHeader() {
-    const char* header = "timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading\n";
+    const char* header = "timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z\n";
     size_t len = strlen(header);
     size_t written = m_txLogFile.write(header, len);
 
@@ -510,7 +568,7 @@ bool DataLogger::writeTxHeader() {
 
 // Write RX log header
 bool DataLogger::writeRxHeader() {
-    const char* header = "timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading\n";
+    const char* header = "timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z\n";
     size_t len = strlen(header);
     size_t written = m_rxLogFile.write(header, len);
 

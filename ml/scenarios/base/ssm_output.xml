@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-01-12 22:04:36 by Eclipse SUMO sumo Version 1.22.0
+<sumoConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+
+    <input>
+        <net-file value="/home/amirkhalifa/RoadSense2/roadsense-v2v/ml/scenarios/base/network.net.xml"/>
+        <route-files value="/home/amirkhalifa/RoadSense2/roadsense-v2v/ml/scenarios/base/vehicles.rou.xml"/>
+    </input>
+
+    <output>
+        <fcd-output value="/home/amirkhalifa/RoadSense2/roadsense-v2v/ml/scenarios/base/fcd_output.csv"/>
+        <fcd-output.geo value="false"/>
+        <fcd-output.acceleration value="true"/>
+    </output>
+
+    <time>
+        <begin value="0"/>
+        <end value="120"/>
+        <step-length value="0.1"/>
+    </time>
+
+    <traci_server>
+        <remote-port value="41111"/>
+    </traci_server>
+
+</sumoConfiguration>
+-->
+
+<SSMLog>
+</SSMLog>

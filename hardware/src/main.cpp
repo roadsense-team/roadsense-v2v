@@ -81,17 +81,15 @@ void handleButton() {
         if (now - lastButtonPress > BUTTON_DEBOUNCE_MS) {
             lastButtonPress = now;
 
-            // Toggle logging
-            auto gpsData = gps.read();
+            // Toggle logging (Mode 1: Network Characterization)
             if (dataLogger.isLogging()) {
                 // Stop logging
                 dataLogger.stopLogging();
                 Logger::getInstance().info("MAIN", "📝 Logging STOPPED");
             } else {
-                // Start logging
-                bool gpsReady = gpsData.valid || gpsData.cached;
-                if (dataLogger.startLogging(VEHICLE_ID, gpsReady)) {
-                    Logger::getInstance().info("MAIN", "📝 Logging STARTED (Session " + String(dataLogger.getSessionNumber()) + ")");
+                // Start characterization logging (TX/RX files)
+                if (dataLogger.startCharacterizationLogging(VEHICLE_ID)) {
+                    Logger::getInstance().info("MAIN", "📝 Network Characterization STARTED (Session " + String(dataLogger.getSessionNumber()) + ")");
                 } else {
                     Logger::getInstance().error("MAIN", "❌ Failed to start logging");
                 }
@@ -154,14 +152,25 @@ void onDataReceived(const uint8_t* data, size_t len) {
         Logger::getInstance().warning("V2V", "Received invalid size: " + String(len));
         return;
     }
-    
+
     const V2VMessage* msg = (const V2VMessage*)data;
-    
-    // Simple log for now
-    String logMsg = "Rx from " + String(msg->vehicleId) + 
-                    " | Speed: " + String(msg->dynamics.speed) + 
-                    " | Lat: " + String(msg->position.lat, 6);
-    Logger::getInstance().info("V2V", logMsg);
+
+    // Queue received message (Mode 1: Network Characterization)
+    // NOTE: queueRxMessage() is ISR-safe - no SD card I/O here!
+    // Messages are written to SD in main loop via processRxQueue()
+    if (dataLogger.isLogging()) {
+        dataLogger.queueRxMessage(*msg);
+    }
+
+    // Debug output (1 per second max to avoid spam)
+    static uint32_t lastRxPrint = 0;
+    if (millis() - lastRxPrint >= 1000) {
+        String logMsg = "Rx from " + String(msg->vehicleId) +
+                        " | Speed: " + String(msg->dynamics.speed, 1) +
+                        " | Age: " + String(msg->age()) + "ms";
+        Logger::getInstance().info("V2V", logMsg);
+        lastRxPrint = millis();
+    }
 }
 
 // ============================================================================
@@ -223,7 +232,10 @@ void setup() {
         log.error("MAIN", "❌ SD Card Initialization FAILED!");
         log.error("MAIN", "Data logging disabled (system will still function)");
     } else {
-        log.info("MAIN", "✅ SD Card Initialized (Session " + String(dataLogger.getSessionNumber() + 1) + " ready)");
+        // Set Mode 1: Network Characterization (for ESP-NOW RTT measurement)
+        dataLogger.setMode(MODE_NETWORK_CHARACTERIZATION);
+        log.info("MAIN", "✅ SD Card Initialized (Next session: " + String(dataLogger.getSessionNumber() + 1) + ")");
+        log.info("MAIN", "Mode: NETWORK CHARACTERIZATION (TX/RX logging)");
         log.info("MAIN", "Press button (GPIO " + String(BUTTON_CALIB_PIN) + ") to start/stop logging");
     }
 
@@ -246,27 +258,28 @@ void loop() {
     gps.update(); // Drains UART buffer
     // imu.update() is not needed, we poll via read()
 
-    // 4. Broadcast V2V Message (10 Hz) + Log if active
+    // 4. Broadcast V2V Message (10 Hz) + Log TX if active
     if (now - lastBroadcastTime >= 100) {
         V2VMessage msg = buildV2VMessage();
 
         // Send broadcast (to FF:FF:FF:FF:FF:FF)
         bool success = transport.send((uint8_t*)&msg, sizeof(msg));
 
-        if (!success) {
-            // Logger::getInstance().warning("V2V", "Send failed");
-        }
-
-        // Log sample if logging active
-        if (dataLogger.isLogging()) {
-            auto gpsData = gps.read();
-            dataLogger.logSample(msg, gpsData);
+        // Log transmitted message ONLY if send succeeded (Mode 1: Network Characterization)
+        // This ensures TX log reflects actual transmitted packets, not failed attempts
+        if (success && dataLogger.isLogging()) {
+            dataLogger.logTxMessage(msg);
         }
 
         lastBroadcastTime = now;
     }
-    
-    // 5. Debug Print (1 Hz)
+
+    // 5. Process queued RX messages (write to SD card - safe in main loop)
+    if (dataLogger.isLogging()) {
+        dataLogger.processRxQueue();
+    }
+
+    // 6. Debug Print (1 Hz)
     if (now - lastPrintTime >= 1000) {
         IGpsSensor::GpsData gpsInfo = gps.read();
 
@@ -279,9 +292,14 @@ void loop() {
             statusMsg = "GPS Fix: NO  | Searching...";
         }
 
-        // Add logging status
+        // Add logging status (show TX/RX counts for Mode 1)
         if (dataLogger.isLogging()) {
-            statusMsg += " | 📝 LOGGING (" + String(dataLogger.getRowCount()) + " rows)";
+            if (dataLogger.getMode() == MODE_NETWORK_CHARACTERIZATION) {
+                statusMsg += " | 📝 LOGGING (TX:" + String(dataLogger.getTxCount()) +
+                             " RX:" + String(dataLogger.getRxCount()) + ")";
+            } else {
+                statusMsg += " | 📝 LOGGING (" + String(dataLogger.getRowCount()) + " rows)";
+            }
         } else {
             statusMsg += " | ⏸ Not logging";
         }
