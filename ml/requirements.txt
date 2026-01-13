@@ -2,12 +2,16 @@
 numpy>=1.24.0
 scipy>=1.10.0
 
+# Visualization
+matplotlib>=3.7.0
+
 # Testing
 pytest>=7.4.0
 pytest-cov>=4.1.0
 pytest-mock>=3.11.0
 
-# Future dependencies (commented out until needed)
-# gymnasium>=0.29.0  # For ConvoyEnv
-# stable-baselines3>=2.1.0  # For RL training
-# traci>=1.18.0  # For SUMO integration
+# RL dependencies
+gymnasium>=0.29.0  # For ConvoyEnv
+stable-baselines3>=2.1.0  # For RL training
+traci>=1.25.0  # For SUMO integration (Matches Docker image v1.25.0+)
+sumolib>=1.25.0

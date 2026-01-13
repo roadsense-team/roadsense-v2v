@@ -1,0 +1,17 @@
+<routes>
+      <!-- Vehicle type with SSM device enabled -->
+      <!-- VARIATION: Aggressive following (tau 1.0 → 0.5 seconds) -->
+      <vType id="car" accel="2.6" decel="4.5" sigma="0.5" length="5" maxSpeed="50" tau="0.5">
+            <param key="has.ssm.device" value="true"/>
+            <param key="device.ssm.measures" value="TTC DRAC PET"/>
+            <param key="device.ssm.thresholds" value="4.0 3.4 2.0"/>
+            <param key="device.ssm.range" value="100.0"/>
+            <param key="device.ssm.file" value="ssm_output.xml"/>
+      </vType>
+
+      <route id="convoy_route" edges="-636924784#1 -636924784#0"/>
+
+      <vehicle id="V003" type="car" depart="0" route="convoy_route" departSpeed="15" departPos="60" color="1,0,0"/>
+      <vehicle id="V002" type="car" depart="0" route="convoy_route" departSpeed="15" departPos="30" color="0,1,0"/>
+      <vehicle id="V001" type="car" depart="0" route="convoy_route" departSpeed="15" departPos="0" color="0,0,1"/>
+</routes>

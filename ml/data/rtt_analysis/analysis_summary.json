@@ -1,0 +1,105 @@
+{
+  "assumptions": {
+    "distance_factor_zero": true,
+    "one_way_latency_symmetric": true
+  },
+  "burst_loss": {
+    "burst_count": 1678,
+    "max_burst_length": 765.0,
+    "mean_burst_length": 4.596543504171633
+  },
+  "duration_s": 1345.107,
+  "gps_noise": {
+    "gps_std_m": 5.492319245395482,
+    "lat_std_m": 6.12249316637309,
+    "lon_std_m": 4.779771837064821,
+    "samples": 13732
+  },
+  "heading_noise_std_deg": null,
+  "high_loss_zones": [
+    {
+      "duration_s": 40.0,
+      "end_s": 40.0,
+      "lat_max": 32.08811188,
+      "lat_min": 32.08792877,
+      "lon_max": 34.80722046,
+      "lon_min": 34.80712509,
+      "loss_rate_avg": 0.985,
+      "loss_rate_max": 1.0,
+      "segment_count": 4,
+      "start_s": 0.0
+    },
+    {
+      "duration_s": 10.0,
+      "end_s": 70.0,
+      "lat_max": 32.08797073,
+      "lat_min": 32.0879631,
+      "lon_max": 34.80727386,
+      "lon_min": 34.80724716,
+      "loss_rate_avg": 1.0,
+      "loss_rate_max": 1.0,
+      "segment_count": 1,
+      "start_s": 60.0
+    },
+    {
+      "duration_s": 100.0,
+      "end_s": 180.0,
+      "lat_max": 32.08802795,
+      "lat_min": 32.08798599,
+      "lon_max": 34.80729675,
+      "lon_min": 34.80728531,
+      "loss_rate_avg": 0.991,
+      "loss_rate_max": 1.0,
+      "segment_count": 10,
+      "start_s": 80.0
+    }
+  ],
+  "imu_noise": {
+    "accel_mag_mean": 9.860774667373452,
+    "accel_mag_std": 0.055492130718472546,
+    "accel_x_std": 0.1185636163324017,
+    "accel_y_std": 0.09301391989607852,
+    "accel_z_std": 0.05324932471952957,
+    "samples": 13802
+  },
+  "input": "/home/amirkhalifa/RoadSense2/rtt_log.csv",
+  "loss": {
+    "baseline_rate": 0.19,
+    "high_loss_threshold": 0.94,
+    "overall_count": 13897,
+    "overall_lost": 7713,
+    "overall_rate": 0.5550118730661294,
+    "p50": 0.67,
+    "p90": 0.94,
+    "p95": 1.0,
+    "segment_count": 135
+  },
+  "one_way_latency_ms": {
+    "count": 6184,
+    "max": 24.0,
+    "mean": 3.348803363518758,
+    "min": 2.0,
+    "p5": 2.0,
+    "p50": 2.5,
+    "p95": 6.5,
+    "std": 1.7530099871431017
+  },
+  "rtt_ms": {
+    "count": 6184,
+    "max": 48.0,
+    "mean": 6.697606727037516,
+    "min": 4.0,
+    "p25": 5.0,
+    "p5": 4.0,
+    "p50": 5.0,
+    "p75": 7.0,
+    "p95": 13.0,
+    "p99": 20.0,
+    "std": 3.5060199742862035
+  },
+  "sequence": {
+    "missing_sequences": 1,
+    "unique_sequences": 13451
+  },
+  "speed_noise_std_ms": 0.06736275291120905
+}
