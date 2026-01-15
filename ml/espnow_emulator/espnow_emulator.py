@@ -492,12 +492,28 @@ class ESPNOWEmulator:
         if seed is not None:
             self._rng.seed(seed)
 
-        self.pending_messages = PriorityQueue()  # Clear pending messages
-        self.last_received = {}
-        self.last_loss_state = {}  # Clear burst loss tracking
-        self.current_time_ms = 0
-        self.msg_counter = 0  # Reset sequence counter
+        self.clear()
         self._randomize_episode_params()
+
+    def clear(self):
+        """
+        Clear message queues without re-randomizing parameters.
+
+        Use this for lightweight state clearing between episodes when you
+        don't need to change the communication parameters. For full reset
+        with parameter re-randomization, use reset() instead.
+
+        This method:
+        - Clears pending message queue
+        - Clears last received messages
+        - Resets burst loss tracking
+        - Resets time and sequence counters
+        """
+        self.pending_messages = PriorityQueue()
+        self.last_received = {}
+        self.last_loss_state = {}
+        self.current_time_ms = 0
+        self.msg_counter = 0
 
     def _calculate_distance(self, pos1: Tuple[float, float],
                            pos2: Tuple[float, float]) -> float:
@@ -738,6 +754,33 @@ class ESPNOWEmulator:
         self.pending_messages.put((arrival_time, self.msg_counter, sender_msg.vehicle_id, received))
 
         return received
+
+    def sync_and_get_messages(self, current_time_ms: int) -> Dict[str, ReceivedMessage]:
+        """
+        Process pending queue to deliver arrived messages, then return all valid messages.
+
+        This replaces get_observation() for the N-element architecture.
+        It separates the 'receive' logic from the 'format' logic.
+
+        Args:
+            current_time_ms: Current simulation time
+
+        Returns:
+            Dict mapping vehicle_id -> ReceivedMessage for all received messages.
+        """
+        while not self.pending_messages.empty():
+            try:
+                arrival_time, _seq, vehicle_id, received_msg = self.pending_messages.queue[0]
+            except IndexError:
+                break
+
+            if arrival_time <= current_time_ms:
+                self.pending_messages.get()
+                self.last_received[vehicle_id] = received_msg
+            else:
+                break
+
+        return self.last_received.copy()
 
     def get_observation(self,
                         ego_speed: float,

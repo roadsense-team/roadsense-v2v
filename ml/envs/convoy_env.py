@@ -1,18 +1,20 @@
 """
 ConvoyEnv Gymnasium environment.
 """
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+import traci
 
-from envs.action_applicator import ActionApplicator
-from envs.hazard_injector import HazardInjector
-from envs.observation_builder import ObservationBuilder
-from envs.reward_calculator import RewardCalculator
-from envs.sumo_connection import SUMOConnection, VehicleState
-from espnow_emulator.espnow_emulator import ESPNOWEmulator
+from .action_applicator import ActionApplicator
+from .hazard_injector import HazardInjector
+from .observation_builder import ObservationBuilder
+from .reward_calculator import RewardCalculator
+from .scenario_manager import ScenarioManager
+from .sumo_connection import SUMOConnection, VehicleState
+from ml.espnow_emulator.espnow_emulator import ESPNOWEmulator
 
 
 class ConvoyEnv(gym.Env):
@@ -23,14 +25,18 @@ class ConvoyEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 10}
 
     EGO_VEHICLE_ID = "V001"
-    LEAD_VEHICLE_IDS = ["V002", "V003"]
+    MAX_PEERS = ObservationBuilder.MAX_PEERS
 
     DEFAULT_MAX_STEPS = 1000
     COLLISION_DIST = 5.0
+    MAX_STARTUP_STEPS = 100
 
     def __init__(
         self,
-        sumo_cfg: str,
+        sumo_cfg: Optional[str] = None,
+        dataset_dir: Optional[str] = None,
+        scenario_mode: str = "train",
+        scenario_seed: Optional[int] = None,
         emulator: Optional[ESPNOWEmulator] = None,
         emulator_params_path: Optional[str] = None,
         max_steps: int = DEFAULT_MAX_STEPS,
@@ -40,13 +46,33 @@ class ConvoyEnv(gym.Env):
     ) -> None:
         super().__init__()
 
+        if sumo_cfg is None and dataset_dir is None:
+            raise ValueError("Must provide either sumo_cfg or dataset_dir")
+        if sumo_cfg is not None and dataset_dir is not None:
+            raise ValueError("Cannot provide both sumo_cfg and dataset_dir")
+
+        if dataset_dir is not None:
+            self.scenario_manager = ScenarioManager(
+                dataset_dir=dataset_dir,
+                seed=scenario_seed,
+                mode=scenario_mode,
+            )
+            self._initial_sumo_cfg = None
+        else:
+            self.scenario_manager = None
+            self._initial_sumo_cfg = sumo_cfg
+
+        self._dataset_dir = dataset_dir
+        self._scenario_seed = scenario_seed
+
         self.sumo_cfg = sumo_cfg
         self.max_steps = max_steps
         self.hazard_injection_enabled = hazard_injection
         self.render_mode = render_mode
         self.gui = gui or (render_mode == "human")
 
-        self.sumo = SUMOConnection(sumo_cfg, gui=self.gui)
+        initial_cfg = sumo_cfg or ""
+        self.sumo = SUMOConnection(initial_cfg, gui=self.gui)
 
         if emulator is not None:
             self.emulator = emulator
@@ -63,32 +89,66 @@ class ConvoyEnv(gym.Env):
         self._step_count = 0
         self._sumo_started = False
 
-        self.observation_space = spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(11,),
-            dtype=np.float32,
-        )
+        self.observation_space = spaces.Dict({
+            "ego": spaces.Box(
+                low=np.array([0.0, -1.0, -1.0, 0.0], dtype=np.float32),
+                high=np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+                dtype=np.float32,
+            ),
+            "peers": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(self.MAX_PEERS, 6),
+                dtype=np.float32,
+            ),
+            "peer_mask": spaces.Box(
+                low=0.0,
+                high=1.0,
+                shape=(self.MAX_PEERS,),
+                dtype=np.float32,
+            ),
+        })
         self.action_space = spaces.Discrete(4)
 
     def reset(
         self,
         seed: Optional[int] = None,
         options: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+    ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
         super().reset(seed=seed)
 
-        if hasattr(self.emulator, "clear"):
-            self.emulator.clear()
-        else:
-            self.emulator.reset(seed=seed)
+        self.emulator.clear()
 
         self._step_count = 0
 
+        scenario_id = None
+        if self.scenario_manager is not None:
+            new_cfg, scenario_id = self.scenario_manager.select_scenario()
+            self.sumo.set_config(str(new_cfg))
+        elif self._initial_sumo_cfg is not None and not self._sumo_started:
+            self.sumo.set_config(self._initial_sumo_cfg)
+
         if self._sumo_started:
             self.sumo.stop()
-        self.sumo.start()
-        self._sumo_started = True
+            self._sumo_started = False
+        try:
+            self.sumo.start()
+            self._sumo_started = True
+        except Exception:
+            self._sumo_started = False
+            raise
+
+        # Wait for ego vehicle to enter the simulation before querying state.
+        for _ in range(self.MAX_STARTUP_STEPS):
+            if self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
+                break
+            self.sumo.step()
+        else:
+            self.sumo.stop()
+            self._sumo_started = False
+            raise RuntimeError(
+                f"Timeout: {self.EGO_VEHICLE_ID} failed to spawn."
+            )
 
         if self.hazard_injector is not None:
             if seed is not None:
@@ -99,24 +159,30 @@ class ConvoyEnv(gym.Env):
         ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
         current_time_ms = int(self.sumo.get_simulation_time() * 1000)
 
-        observation = self.obs_builder.build(
-            ego_state=ego_state,
-            emulator_obs=self.emulator.get_observation(
-                ego_speed=ego_state.speed,
-                current_time_ms=current_time_ms,
-            ),
-        )
+        observation, _ = self._step_espnow(ego_state, current_time_ms)
 
         info = {
             "step": 0,
             "simulation_time": self.sumo.get_simulation_time(),
+            "scenario_id": scenario_id,
         }
 
         return observation, info
 
     def step(
         self, action: int
-    ) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+    ) -> Tuple[Dict[str, np.ndarray], float, bool, bool, Dict[str, Any]]:
+        if isinstance(action, np.ndarray):
+            if action.size != 1:
+                raise ValueError(f"Expected scalar action, got shape {action.shape}")
+            action = int(action.item())
+        elif hasattr(action, "item"):
+            action = int(action.item())
+        elif isinstance(action, (list, tuple)):
+            if len(action) != 1:
+                raise ValueError(f"Expected scalar action, got {len(action)} values")
+            action = int(action[0])
+
         actual_decel = self.action_applicator.apply(self.sumo, action)
 
         hazard_injected = False
@@ -132,13 +198,7 @@ class ConvoyEnv(gym.Env):
         ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
         current_time_ms = int(self.sumo.get_simulation_time() * 1000)
 
-        peer_states = []
-        for vid in self.LEAD_VEHICLE_IDS:
-            if self.sumo.is_vehicle_active(vid):
-                peer_states.append(self.sumo.get_vehicle_state(vid))
-
-        self._transmit_vehicle_states(ego_state, peer_states, current_time_ms)
-
+        observation, peer_states = self._step_espnow(ego_state, current_time_ms)
         distance = self._calculate_min_distance(ego_state, peer_states)
 
         terminated = False
@@ -152,14 +212,6 @@ class ConvoyEnv(gym.Env):
 
         if not self._all_vehicles_active():
             truncated = True
-
-        observation = self.obs_builder.build(
-            ego_state=ego_state,
-            emulator_obs=self.emulator.get_observation(
-                ego_speed=ego_state.speed,
-                current_time_ms=current_time_ms,
-            ),
-        )
 
         reward, reward_info = self.reward_calculator.calculate(
             distance=distance,
@@ -182,15 +234,72 @@ class ConvoyEnv(gym.Env):
         ego_state: VehicleState,
         peer_states: Iterable[VehicleState],
         current_time_ms: int,
-    ) -> None:
+    ) -> List["ReceivedMessage"]:
+        received_messages = []
         for state in peer_states:
             msg = state.to_v2v_message(timestamp_ms=current_time_ms)
-            self.emulator.transmit(
+            received = self.emulator.transmit(
                 sender_msg=msg,
                 sender_pos=(state.x, state.y),
                 receiver_pos=(ego_state.x, ego_state.y),
                 current_time_ms=current_time_ms,
             )
+            if received is not None:
+                received_messages.append(received)
+
+        return received_messages
+
+    def _step_espnow(
+        self,
+        ego_state: VehicleState,
+        current_time_ms: int,
+    ) -> Tuple[Dict[str, np.ndarray], List[VehicleState]]:
+        ego_pos = (ego_state.x, ego_state.y)
+        peer_states = []
+
+        for vehicle_id in traci.vehicle.getIDList():
+            if vehicle_id == self.EGO_VEHICLE_ID:
+                continue
+            peer_states.append(self.sumo.get_vehicle_state(vehicle_id))
+
+        self._transmit_vehicle_states(
+            ego_state=ego_state,
+            peer_states=peer_states,
+            current_time_ms=current_time_ms,
+        )
+
+        meters_per_deg = ESPNOWEmulator.METERS_PER_DEG_LAT
+        peer_observations = []
+        received_map = self.emulator.sync_and_get_messages(current_time_ms)
+        staleness_threshold = self.obs_builder.STALENESS_THRESHOLD
+        params = getattr(self.emulator, "params", None)
+        if isinstance(params, dict):
+            staleness_threshold = params.get("observation", {}).get(
+                "staleness_threshold_ms",
+                staleness_threshold,
+            )
+
+        for received in received_map.values():
+            msg = received.message
+            age_ms = current_time_ms - received.received_at_ms + received.age_ms
+            valid = age_ms < staleness_threshold
+            peer_observations.append({
+                "x": msg.lon * meters_per_deg,
+                "y": msg.lat * meters_per_deg,
+                "speed": msg.speed,
+                "heading": msg.heading,
+                "accel": msg.accel_x,
+                "age_ms": age_ms,
+                "valid": valid,
+            })
+
+        observation = self.obs_builder.build(
+            ego_state=ego_state,
+            peer_observations=peer_observations,
+            ego_pos=ego_pos,
+        )
+
+        return observation, peer_states
 
     def _calculate_min_distance(
         self,
@@ -210,12 +319,7 @@ class ConvoyEnv(gym.Env):
         return min_dist
 
     def _all_vehicles_active(self) -> bool:
-        if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
-            return False
-        for vid in self.LEAD_VEHICLE_IDS:
-            if not self.sumo.is_vehicle_active(vid):
-                return False
-        return True
+        return self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID)
 
     def render(self) -> None:
         pass
@@ -224,3 +328,50 @@ class ConvoyEnv(gym.Env):
         if self._sumo_started:
             self.sumo.stop()
             self._sumo_started = False
+
+    def set_eval_mode(self) -> None:
+        """
+        Switch to evaluation mode (sequential scenario iteration).
+
+        Raises:
+            RuntimeError: If not using dataset-based configuration
+        """
+        if self.scenario_manager is None:
+            raise RuntimeError("set_eval_mode() requires dataset_dir configuration")
+        self.scenario_manager = ScenarioManager(
+            dataset_dir=self._dataset_dir,
+            seed=self._scenario_seed,
+            mode="eval",
+        )
+
+    def set_train_mode(self) -> None:
+        """
+        Switch to training mode (random scenario selection).
+
+        Raises:
+            RuntimeError: If not using dataset-based configuration
+        """
+        if self.scenario_manager is None:
+            raise RuntimeError("set_train_mode() requires dataset_dir configuration")
+        self.scenario_manager = ScenarioManager(
+            dataset_dir=self._dataset_dir,
+            seed=self._scenario_seed,
+            mode="train",
+        )
+
+    def get_scenario_count(self) -> Tuple[int, int]:
+        """
+        Get the number of scenarios in train and eval sets.
+
+        Returns:
+            Tuple of (train_count, eval_count)
+
+        Raises:
+            RuntimeError: If not using dataset-based configuration
+        """
+        if self.scenario_manager is None:
+            raise RuntimeError("get_scenario_count() requires dataset_dir configuration")
+        return (
+            len(self.scenario_manager.manifest["train_scenarios"]),
+            len(self.scenario_manager.manifest["eval_scenarios"]),
+        )

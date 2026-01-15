@@ -19,8 +19,16 @@ venv/
 # ML models (track only .h files)
 ml/models/*.h5
 ml/models/*.pb
+ml/models/runs/
 ml/data/raw/
 ml/data/processed/
+ml/scenarios/datasets/
+ml/.pytest_cache/
+
+# SUMO output files
+ml/scenarios/**/ssm_output.xml
+ml/scenarios/**/fcd_output.xml
+ml/scenarios/**/tripinfo.xml
 
 # MCP secrets
 mcp/.env

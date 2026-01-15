@@ -13,5 +13,6 @@ pytest-mock>=3.11.0
 # RL dependencies
 gymnasium>=0.29.0  # For ConvoyEnv
 stable-baselines3>=2.1.0  # For RL training
+tensorboard>=2.14.0  # For training logs
 traci>=1.25.0  # For SUMO integration (Matches Docker image v1.25.0+)
 sumolib>=1.25.0

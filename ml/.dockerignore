@@ -1,0 +1,32 @@
+# Ignore Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Ignore virtual environments
+venv/
+.venv/
+env/
+
+# Ignore test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Ignore IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Ignore data files (too large for image)
+data/
+*.csv
+*.json
+!emulator_params_5m.json
+
+# Ignore logs
+*.log
+logs/

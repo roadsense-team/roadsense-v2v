@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 
-from espnow_emulator.espnow_emulator import ESPNOWEmulator, V2VMessage
+from ml.espnow_emulator.espnow_emulator import ESPNOWEmulator, V2VMessage
 from envs.sumo_connection import VehicleState
 
 

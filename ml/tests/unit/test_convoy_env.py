@@ -1,12 +1,15 @@
 """
 Unit tests for ConvoyEnv (Phase 6).
 """
+import json
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
 
 from envs.convoy_env import ConvoyEnv
+from envs.observation_builder import ObservationBuilder
 from envs.sumo_connection import VehicleState
 
 
@@ -32,6 +35,34 @@ def _set_states(mock_sumo: Mock, states: dict) -> None:
     mock_sumo.get_vehicle_state = Mock(side_effect=lambda vid: states[vid])
 
 
+def _make_dataset_dir(dataset_dir: Path) -> None:
+    train_ids = ["train_000", "train_001"]
+    eval_ids = ["eval_000", "eval_001"]
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    (dataset_dir / "manifest.json").write_text(
+        json.dumps({
+            "dataset_id": dataset_dir.name,
+            "train_scenarios": train_ids,
+            "eval_scenarios": eval_ids,
+        }),
+        encoding="utf-8",
+    )
+    for scenario_id in train_ids:
+        scenario_dir = dataset_dir / "train" / scenario_id
+        scenario_dir.mkdir(parents=True, exist_ok=True)
+        (scenario_dir / "scenario.sumocfg").write_text(
+            "<configuration></configuration>",
+            encoding="utf-8",
+        )
+    for scenario_id in eval_ids:
+        scenario_dir = dataset_dir / "eval" / scenario_id
+        scenario_dir.mkdir(parents=True, exist_ok=True)
+        (scenario_dir / "scenario.sumocfg").write_text(
+            "<configuration></configuration>",
+            encoding="utf-8",
+        )
+
+
 @pytest.fixture
 def mock_sumo():
     """Mock SUMOConnection for unit tests."""
@@ -45,6 +76,7 @@ def mock_sumo():
     mock.get_vehicle_state = Mock(
         return_value=_make_state("V001", x=0.0, y=0.0)
     )
+    mock.set_config = Mock()
     return mock
 
 
@@ -53,21 +85,8 @@ def mock_emulator():
     """Mock ESPNOWEmulator for unit tests."""
     mock = Mock()
     mock.clear = Mock()
-    mock.transmit = Mock()
-    mock.get_observation = Mock(return_value={
-        "v002_lat": 0.0,
-        "v002_lon": 0.0,
-        "v002_speed": 20.0,
-        "v002_accel_x": 0.0,
-        "v002_age_ms": 10,
-        "v002_valid": True,
-        "v003_lat": 0.0,
-        "v003_lon": 0.0,
-        "v003_speed": 20.0,
-        "v003_accel_x": 0.0,
-        "v003_age_ms": 15,
-        "v003_valid": True,
-    })
+    mock.transmit = Mock(return_value=None)
+    mock.sync_and_get_messages = Mock(return_value={})
     return mock
 
 
@@ -77,7 +96,8 @@ def env_with_mocks(mock_sumo, mock_emulator, tmp_path):
     cfg = tmp_path / "test.sumocfg"
     cfg.write_text("<configuration></configuration>")
 
-    with patch("envs.convoy_env.SUMOConnection", return_value=mock_sumo):
+    with patch("envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+         patch("traci.vehicle.getIDList", return_value=["V001", "V002", "V003"]):
         env = ConvoyEnv(
             sumo_cfg=str(cfg),
             emulator=mock_emulator,
@@ -94,16 +114,33 @@ def test_reset_returns_observation_and_info(env_with_mocks):
     assert isinstance(result, tuple)
     assert len(result) == 2
     obs, info = result
-    assert isinstance(obs, np.ndarray)
+    assert isinstance(obs, dict)
     assert isinstance(info, dict)
 
 
-def test_reset_observation_shape_is_11(env_with_mocks):
-    """Initial observation has shape (11,)."""
+def test_step_accepts_numpy_action(env_with_mocks):
+    """step() accepts numpy array actions from vectorized envs."""
+    obs, info = env_with_mocks.reset()
+    assert isinstance(obs, dict)
+    assert isinstance(info, dict)
+
+    result = env_with_mocks.step(np.array([0], dtype=np.int64))
+
+    assert isinstance(result, tuple)
+    assert len(result) == 5
+
+
+def test_reset_observation_shape_is_dict(env_with_mocks):
+    """Initial observation has Dict entries with expected shapes."""
     obs, _ = env_with_mocks.reset()
 
-    assert obs.shape == (11,)
-    assert obs.dtype == np.float32
+    assert set(obs.keys()) == {"ego", "peers", "peer_mask"}
+    assert obs["ego"].shape == (4,)
+    assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
+    assert obs["peer_mask"].shape == (ObservationBuilder.MAX_PEERS,)
+    assert obs["ego"].dtype == np.float32
+    assert obs["peers"].dtype == np.float32
+    assert obs["peer_mask"].dtype == np.float32
 
 
 def test_reset_clears_emulator_message_queue(env_with_mocks, mock_emulator):
@@ -123,12 +160,53 @@ def test_reset_restarts_sumo_simulation(env_with_mocks, mock_sumo):
     assert mock_sumo.start.call_count == 2
 
 
+def test_reset_waits_for_ego_spawn(env_with_mocks, mock_sumo):
+    """reset() steps until V001 is active."""
+    mock_sumo.is_vehicle_active = Mock(
+        side_effect=[False, False, True],
+    )
+
+    env_with_mocks.reset()
+
+    assert mock_sumo.step.call_count == 2
+
+
+def test_reset_times_out_when_ego_missing(tmp_path, mock_emulator):
+    """reset() raises if V001 never appears."""
+    cfg = tmp_path / "test.sumocfg"
+    cfg.write_text("<configuration></configuration>")
+
+    with patch("envs.convoy_env.SUMOConnection") as mock_sumo_class, \
+         patch("traci.vehicle.getIDList", return_value=["V001"]):
+        mock_sumo = Mock()
+        mock_sumo.start = Mock()
+        mock_sumo.stop = Mock()
+        mock_sumo.step = Mock()
+        mock_sumo.get_simulation_time = Mock(return_value=0.0)
+        mock_sumo.is_vehicle_active = Mock(return_value=False)
+        mock_sumo_class.return_value = mock_sumo
+
+        env = ConvoyEnv(
+            sumo_cfg=str(cfg),
+            emulator=mock_emulator,
+            hazard_injection=False,
+        )
+        env.MAX_STARTUP_STEPS = 3
+
+        with pytest.raises(RuntimeError):
+            env.reset()
+
+        mock_sumo.stop.assert_called_once()
+        env.close()
+
+
 def test_reset_with_seed_is_reproducible(tmp_path, mock_emulator):
     """Same seed produces same hazard injection pattern."""
     cfg = tmp_path / "test.sumocfg"
     cfg.write_text("<configuration></configuration>")
 
-    with patch("envs.convoy_env.SUMOConnection") as mock_sumo_class:
+    with patch("envs.convoy_env.SUMOConnection") as mock_sumo_class, \
+         patch("traci.vehicle.getIDList", return_value=["V001"]):
         mock_sumo = Mock()
         mock_sumo.start = Mock()
         mock_sumo.stop = Mock()
@@ -226,16 +304,11 @@ def test_max_steps_sets_truncated_true(env_with_mocks, mock_sumo):
     assert i == 4
 
 
-def test_vehicle_exit_sets_truncated_true(env_with_mocks, mock_sumo):
-    """If lead vehicle leaves simulation -> truncated=True."""
+def test_ego_exit_sets_truncated_true(env_with_mocks, mock_sumo):
+    """If ego leaves simulation -> truncated=True."""
     env_with_mocks.reset()
 
-    def is_active(vid):
-        if vid == "V002":
-            return False
-        return True
-
-    mock_sumo.is_vehicle_active = Mock(side_effect=is_active)
+    mock_sumo.is_vehicle_active = Mock(return_value=False)
 
     _, _, _, truncated, _ = env_with_mocks.step(0)
 
@@ -258,3 +331,95 @@ def test_truncated_does_not_apply_collision_reward(env_with_mocks, mock_sumo):
     assert truncated is True
     assert terminated is False
     assert info["reward_safety"] != -100.0
+
+
+class TestConvoyEnvDataset:
+    """Tests for dataset-based ConvoyEnv."""
+
+    def test_init_with_dataset_dir(self, tmp_path, mock_emulator, mock_sumo):
+        dataset_dir = tmp_path / "dataset"
+        _make_dataset_dir(dataset_dir)
+
+        with patch("envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+             patch("traci.vehicle.getIDList", return_value=["V001"]):
+            env = ConvoyEnv(
+                dataset_dir=str(dataset_dir),
+                scenario_mode="train",
+                scenario_seed=123,
+                emulator=mock_emulator,
+                hazard_injection=False,
+            )
+
+        assert env.scenario_manager is not None
+        env.close()
+
+    def test_init_mutual_exclusion(self, tmp_path):
+        dataset_dir = tmp_path / "dataset"
+        _make_dataset_dir(dataset_dir)
+
+        with pytest.raises(ValueError):
+            ConvoyEnv(
+                sumo_cfg="ml/scenarios/base/scenario.sumocfg",
+                dataset_dir=str(dataset_dir),
+            )
+
+        with pytest.raises(ValueError):
+            ConvoyEnv()
+
+    def test_reset_switches_scenario(self, tmp_path, mock_emulator, mock_sumo):
+        dataset_dir = tmp_path / "dataset"
+        _make_dataset_dir(dataset_dir)
+
+        with patch("envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+             patch("traci.vehicle.getIDList", return_value=["V001"]):
+            env = ConvoyEnv(
+                dataset_dir=str(dataset_dir),
+                scenario_mode="eval",
+                emulator=mock_emulator,
+                hazard_injection=False,
+            )
+
+            env.reset()
+            env.reset()
+
+        first_call = mock_sumo.set_config.call_args_list[0].args[0]
+        second_call = mock_sumo.set_config.call_args_list[1].args[0]
+
+        assert first_call.endswith("eval_000/scenario.sumocfg")
+        assert second_call.endswith("eval_001/scenario.sumocfg")
+        env.close()
+
+    def test_reset_returns_scenario_id(self, tmp_path, mock_emulator, mock_sumo):
+        dataset_dir = tmp_path / "dataset"
+        _make_dataset_dir(dataset_dir)
+
+        with patch("envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+             patch("traci.vehicle.getIDList", return_value=["V001"]):
+            env = ConvoyEnv(
+                dataset_dir=str(dataset_dir),
+                scenario_mode="eval",
+                emulator=mock_emulator,
+                hazard_injection=False,
+            )
+
+            _, info = env.reset()
+
+        assert info["scenario_id"] == "eval_000"
+        env.close()
+
+    def test_backward_compatible_sumo_cfg(self, tmp_path, mock_emulator, mock_sumo):
+        cfg = tmp_path / "single.sumocfg"
+        cfg.write_text("<configuration></configuration>")
+
+        with patch("envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+             patch("traci.vehicle.getIDList", return_value=["V001"]):
+            env = ConvoyEnv(
+                sumo_cfg=str(cfg),
+                emulator=mock_emulator,
+                hazard_injection=False,
+            )
+
+            _, info = env.reset()
+
+        assert info["scenario_id"] is None
+        env.close()

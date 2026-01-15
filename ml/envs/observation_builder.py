@@ -3,66 +3,91 @@ Observation builder for ConvoyEnv.
 """
 
 import math
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 
-from envs.sumo_connection import VehicleState
-from espnow_emulator.espnow_emulator import ESPNOWEmulator
+from .sumo_connection import VehicleState
 
 
 class ObservationBuilder:
     """
-    Builds normalized observation array from emulator output.
+    Builds observation dict for variable-n peer environments.
 
-    Observation space (11 features):
-    [0]    ego_speed (normalized by max_speed)
-    [1-5]  v002: rel_dist, rel_speed, accel, age_norm, valid
-    [6-10] v003: rel_dist, rel_speed, accel, age_norm, valid
+    Keys:
+        - ego: [speed/30, accel/10, heading/pi, peer_count/8]
+        - peers: (MAX_PEERS, 6) peer features
+        - peer_mask: (MAX_PEERS,) 1.0 for valid peers, 0.0 for padding
     """
 
+    MAX_PEERS = 8
     MAX_SPEED = 30.0
     MAX_DISTANCE = 100.0
     MAX_ACCEL = 10.0
     STALENESS_THRESHOLD = 500.0
-    MISSING_MESSAGE_AGE_MS = 9999
 
-    def build(self, ego_state: VehicleState, emulator_obs: Dict) -> np.ndarray:
+    def build(
+        self,
+        ego_state: VehicleState,
+        peer_observations: List[Dict[str, float]],
+        ego_pos: Tuple[float, float],
+    ) -> Dict[str, np.ndarray]:
         """
-        Build observation array from ego state and emulator output.
+        Build observation dict from ego state and variable peer list.
 
         Returns:
-            np.ndarray of shape (11,) with dtype float32
+            Dict with 'ego', 'peers', and 'peer_mask' arrays
         """
-        ego_speed_norm = ego_state.speed / self.MAX_SPEED
-        v002 = self._build_peer_features("v002", ego_state, emulator_obs)
-        v003 = self._build_peer_features("v003", ego_state, emulator_obs)
+        ego_heading_rad = math.radians(ego_state.heading)
+        ego_heading_rad = (ego_heading_rad + math.pi) % (2 * math.pi) - math.pi
 
-        return np.array([ego_speed_norm] + v002 + v003, dtype=np.float32)
+        peers = np.zeros((self.MAX_PEERS, 6), dtype=np.float32)
+        peer_mask = np.zeros((self.MAX_PEERS,), dtype=np.float32)
 
-    def _build_peer_features(
-        self, vehicle_key: str, ego_state: VehicleState, emulator_obs: Dict
-    ) -> List[float]:
-        prefix = vehicle_key.lower()
-        lat = emulator_obs.get(f"{prefix}_lat", 0.0)
-        lon = emulator_obs.get(f"{prefix}_lon", 0.0)
-        speed = emulator_obs.get(f"{prefix}_speed", 0.0)
-        accel_x = emulator_obs.get(f"{prefix}_accel_x", 0.0)
-        age_ms = emulator_obs.get(f"{prefix}_age_ms", self.MISSING_MESSAGE_AGE_MS)
-        valid = bool(emulator_obs.get(f"{prefix}_valid", False))
+        valid_count = 0
+        for peer in peer_observations[: self.MAX_PEERS]:
+            if not peer.get("valid", True):
+                continue
 
-        if not valid and age_ms >= self.MISSING_MESSAGE_AGE_MS:
-            return [0.0, 0.0, 0.0, 0.0, 0.0]
+            dx = peer["x"] - ego_pos[0]
+            dy = peer["y"] - ego_pos[1]
 
-        peer_x = lon * ESPNOWEmulator.METERS_PER_DEG_LAT
-        peer_y = lat * ESPNOWEmulator.METERS_PER_DEG_LAT
-        rel_dist = math.hypot(ego_state.x - peer_x, ego_state.y - peer_y)
-        rel_speed = speed - ego_state.speed
+            cos_h = math.cos(-ego_heading_rad)
+            sin_h = math.sin(-ego_heading_rad)
+            rel_x = dx * cos_h - dy * sin_h
+            rel_y = dx * sin_h + dy * cos_h
 
-        rel_dist_norm = rel_dist / self.MAX_DISTANCE
-        rel_speed_norm = rel_speed / self.MAX_SPEED
-        accel_norm = accel_x / self.MAX_ACCEL
-        age_norm = age_ms / self.STALENESS_THRESHOLD
-        valid_flag = 1.0 if valid else 0.0
+            rel_speed = peer["speed"] - ego_state.speed
+            peer_heading_rad = math.radians(peer["heading"])
+            rel_heading = peer_heading_rad - ego_heading_rad
+            rel_heading = (rel_heading + math.pi) % (2 * math.pi) - math.pi
 
-        return [rel_dist_norm, rel_speed_norm, accel_norm, age_norm, valid_flag]
+            peers[valid_count] = np.array(
+                [
+                    rel_x / self.MAX_DISTANCE,
+                    rel_y / self.MAX_DISTANCE,
+                    rel_speed / self.MAX_SPEED,
+                    rel_heading / math.pi,
+                    peer["accel"] / self.MAX_ACCEL,
+                    peer["age_ms"] / self.STALENESS_THRESHOLD,
+                ],
+                dtype=np.float32,
+            )
+            peer_mask[valid_count] = 1.0
+            valid_count += 1
+
+        ego = np.array(
+            [
+                ego_state.speed / self.MAX_SPEED,
+                ego_state.acceleration / self.MAX_ACCEL,
+                ego_heading_rad / math.pi,
+                valid_count / self.MAX_PEERS,
+            ],
+            dtype=np.float32,
+        )
+
+        return {
+            "ego": ego,
+            "peers": peers,
+            "peer_mask": peer_mask,
+        }
