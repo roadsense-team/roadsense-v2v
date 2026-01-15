@@ -66,20 +66,28 @@ def test_full_episode_completes_without_crash(env):
 @pytest.mark.skipif(not SUMO_AVAILABLE, reason="SUMO not installed")
 def test_full_episode_returns_valid_observations(env):
     """
-    Every step returns shape (11,) float32 observation.
+    Every step returns Dict observation with expected shapes.
     """
     obs, _ = env.reset()
 
-    assert obs.shape == (11,)
-    assert obs.dtype == np.float32
+    assert set(obs.keys()) == {"ego", "peers", "peer_mask"}
+    assert obs["ego"].shape == (4,)
+    assert obs["peers"].shape == (8, 6)
+    assert obs["peer_mask"].shape == (8,)
+    assert obs["ego"].dtype == np.float32
+    assert obs["peers"].dtype == np.float32
+    assert obs["peer_mask"].dtype == np.float32
 
     for _ in range(10):
         action = env.action_space.sample()
         obs, reward, terminated, truncated, info = env.step(action)
 
-        assert obs.shape == (11,)
-        assert obs.dtype == np.float32
-        assert np.isfinite(obs).all(), "Observation contains NaN or Inf"
+        assert obs["ego"].shape == (4,)
+        assert obs["peers"].shape == (8, 6)
+        assert obs["peer_mask"].shape == (8,)
+        assert np.isfinite(obs["ego"]).all(), "Observation contains NaN or Inf"
+        assert np.isfinite(obs["peers"]).all(), "Observation contains NaN or Inf"
+        assert np.isfinite(obs["peer_mask"]).all(), "Observation contains NaN or Inf"
 
         if terminated or truncated:
             break
@@ -112,7 +120,7 @@ def test_gym_make_creates_convoy_env(scenario_path):
 @pytest.mark.skipif(not SUMO_AVAILABLE, reason="SUMO not installed")
 def test_registered_env_has_correct_observation_space(scenario_path):
     """
-    observation_space is Box(11,) float32.
+    observation_space is Dict with expected shapes.
     """
     import gymnasium as gym
     import ml.envs
@@ -124,8 +132,14 @@ def test_registered_env_has_correct_observation_space(scenario_path):
     )
 
     try:
-        assert env.observation_space.shape == (11,)
-        assert env.observation_space.dtype == np.float32
+        from gymnasium.spaces import Dict as DictSpace
+        assert isinstance(env.observation_space, DictSpace)
+        assert env.observation_space["ego"].shape == (4,)
+        assert env.observation_space["peers"].shape == (8, 6)
+        assert env.observation_space["peer_mask"].shape == (8,)
+        assert env.observation_space["ego"].dtype == np.float32
+        assert env.observation_space["peers"].dtype == np.float32
+        assert env.observation_space["peer_mask"].dtype == np.float32
     finally:
         env.close()
 

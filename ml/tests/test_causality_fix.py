@@ -143,6 +143,45 @@ class TestCausalityFix:
         assert obs['v002_valid'] is True
         assert obs['v002_lat'] == 32.002
 
+    def test_sync_and_get_messages_respects_arrival_time(self):
+        """
+        sync_and_get_messages should only return messages after arrival time.
+        """
+        emulator = ESPNOWEmulator(domain_randomization=False)
+
+        emulator.params['latency']['base_ms'] = 50
+        emulator.params['latency']['distance_factor'] = 0
+        emulator.params['latency']['jitter_std_ms'] = 0
+        emulator.params['packet_loss']['base_rate'] = 0
+
+        msg = V2VMessage(
+            vehicle_id='V002',
+            lat=32.0,
+            lon=34.0,
+            speed=15.0,
+            heading=90.0,
+            accel_x=0.0,
+            accel_y=0.0,
+            accel_z=9.8,
+            gyro_x=0.0,
+            gyro_y=0.0,
+            gyro_z=0.0,
+            timestamp_ms=1000
+        )
+
+        emulator.transmit(
+            sender_msg=msg,
+            sender_pos=(10, 0),
+            receiver_pos=(0, 0),
+            current_time_ms=1000
+        )
+
+        early = emulator.sync_and_get_messages(current_time_ms=1001)
+        assert "V002" not in early
+
+        arrived = emulator.sync_and_get_messages(current_time_ms=1050)
+        assert "V002" in arrived
+
 
 class TestBurstLossFix:
     """Verify that burst loss tracking is fixed."""

@@ -3,7 +3,7 @@ SUMO/TraCI connection utilities.
 """
 
 from dataclasses import dataclass
-from espnow_emulator.espnow_emulator import V2VMessage, ESPNOWEmulator
+from ml.espnow_emulator.espnow_emulator import V2VMessage, ESPNOWEmulator
 
 
 import traci
@@ -24,6 +24,13 @@ class VehicleState:
         # Clamping speed to 0.0 if negative
         if self.speed < 0:
             object.__setattr__(self, "speed", 0.0)
+        
+        # Clamp extreme acceleration values (e.g. TraCI invalid values)
+        # 10.0 is the MAX_ACCEL used in ObservationBuilder
+        if self.acceleration > 10.0:
+            object.__setattr__(self, "acceleration", 10.0)
+        elif self.acceleration < -10.0:
+            object.__setattr__(self, "acceleration", -10.0)
 
     def to_v2v_message(self, timestamp_ms: int) -> V2VMessage:
         """
@@ -63,6 +70,18 @@ class SUMOConnection:
         self.gui = gui
         self.sumo_binary = sumo_binary
         self.port = port
+
+    def set_config(self, sumo_cfg: str) -> None:
+        """
+        Update the scenario configuration for the next start().
+
+        Args:
+            sumo_cfg: Path to the new scenario.sumocfg file
+
+        Note:
+            This does NOT restart SUMO. Call stop() then start() to apply.
+        """
+        self.sumo_cfg = sumo_cfg
 
     def start(self):
         """Start SUMO simulation."""

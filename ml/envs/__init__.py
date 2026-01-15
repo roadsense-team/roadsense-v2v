@@ -13,21 +13,23 @@ _DEFAULT_SCENARIO = os.path.join(_SCENARIOS_DIR, "base", "scenario.sumocfg")
 
 register(
     id="RoadSense-Convoy-v0",
-    entry_point="envs.convoy_env:ConvoyEnv",
+    entry_point="ml.envs.convoy_env:ConvoyEnv",
     kwargs={
         "sumo_cfg": _DEFAULT_SCENARIO,
     },
 )
 
-from envs.convoy_env import ConvoyEnv
-from envs.sumo_connection import SUMOConnection, VehicleState
-from envs.action_applicator import ActionApplicator
-from envs.reward_calculator import RewardCalculator
-from envs.observation_builder import ObservationBuilder
-from envs.hazard_injector import HazardInjector
+from .convoy_env import ConvoyEnv
+from .scenario_manager import ScenarioManager
+from .sumo_connection import SUMOConnection, VehicleState
+from .action_applicator import ActionApplicator
+from .reward_calculator import RewardCalculator
+from .observation_builder import ObservationBuilder
+from .hazard_injector import HazardInjector
 
 __all__ = [
     "ConvoyEnv",
+    "ScenarioManager",
     "SUMOConnection",
     "VehicleState",
     "ActionApplicator",
