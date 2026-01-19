@@ -29,10 +29,6 @@
     "jitter_std_ms": 1.0455871983484109
   },
   "observation": {
-    "monitored_vehicles": [
-      "V002",
-      "V003"
-    ],
     "staleness_threshold_ms": 500
   },
   "packet_loss": {
