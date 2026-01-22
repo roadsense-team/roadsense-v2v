@@ -56,7 +56,7 @@
 using ImuData = IImuSensor::ImuData;
 
 // ESP-NOW
-#define ESPNOW_CHANNEL    1
+#define ESPNOW_CHANNEL    6
 
 // =============================================================================
 // RTT Configuration
@@ -144,6 +144,26 @@ bool initEspNow() {
     // Step 3: Set WiFi channel
     esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
     logger.info("ESP-NOW", "WiFi channel set to " + String(ESPNOW_CHANNEL));
+
+    // Step 3.5: Enable Long Range (LR) Mode and Max TX Power
+    // =========================================================================
+    // WIFI_PROTOCOL_LR: Proprietary Espressif mode (~250-500kbps)
+    // - Increases receiver sensitivity by +5-10 dB
+    // - CRITICAL: Both sender and reflector MUST use LR mode
+    // =========================================================================
+    esp_err_t lr_result = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_LR);
+    if (lr_result == ESP_OK) {
+        logger.info("ESP-NOW", "Long Range (LR) mode ENABLED");
+    } else {
+        logger.warning("ESP-NOW", "Failed to set LR mode (err=" + String(lr_result) + "), using standard protocol");
+    }
+
+    esp_err_t tx_result = esp_wifi_set_max_tx_power(84);
+    if (tx_result == ESP_OK) {
+        logger.info("ESP-NOW", "TX power set to maximum (84 = ~21dBm)");
+    } else {
+        logger.warning("ESP-NOW", "Failed to set TX power (err=" + String(tx_result) + ")");
+    }
 
     // Step 4: Initialize ESP-NOW
     if (esp_now_init() != ESP_OK) {

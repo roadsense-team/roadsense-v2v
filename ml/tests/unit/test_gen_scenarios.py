@@ -81,7 +81,7 @@ def test_augment_routes_v001_depart_unchanged() -> None:
     routes_tree = _make_routes_tree()
     rng = np.random.default_rng(123)
 
-    augmented = gen_scenarios.augment_routes(
+    augmented, peer_count = gen_scenarios.augment_routes(
         routes_tree,
         rng,
         gen_scenarios.AUGMENTATION_RANGES,
@@ -90,13 +90,14 @@ def test_augment_routes_v001_depart_unchanged() -> None:
     _, vehicles = _extract_routes_values(augmented)
     v001_depart = {vid: depart for vid, depart in vehicles}["V001"]
     assert v001_depart in ("0", "0.0")
+    assert peer_count == 2  # V002 and V003
 
 
 def test_augment_routes_parameters_in_range() -> None:
     routes_tree = _make_routes_tree()
     rng = np.random.default_rng(42)
 
-    augmented = gen_scenarios.augment_routes(
+    augmented, _ = gen_scenarios.augment_routes(
         routes_tree,
         rng,
         gen_scenarios.AUGMENTATION_RANGES,
@@ -118,7 +119,7 @@ def test_augment_routes_sorts_by_depart() -> None:
     routes_tree = _make_routes_tree()
     rng = np.random.default_rng(7)
 
-    augmented = gen_scenarios.augment_routes(
+    augmented, _ = gen_scenarios.augment_routes(
         routes_tree,
         rng,
         gen_scenarios.AUGMENTATION_RANGES,
@@ -134,18 +135,19 @@ def test_augment_routes_deterministic() -> None:
     rng_a = np.random.default_rng(999)
     rng_b = np.random.default_rng(999)
 
-    augmented_a = gen_scenarios.augment_routes(
+    augmented_a, count_a = gen_scenarios.augment_routes(
         copy.deepcopy(routes_tree),
         rng_a,
         gen_scenarios.AUGMENTATION_RANGES,
     )
-    augmented_b = gen_scenarios.augment_routes(
+    augmented_b, count_b = gen_scenarios.augment_routes(
         copy.deepcopy(routes_tree),
         rng_b,
         gen_scenarios.AUGMENTATION_RANGES,
     )
 
     assert _extract_routes_values(augmented_a) == _extract_routes_values(augmented_b)
+    assert count_a == count_b
 
 
 def test_write_manifest_schema_valid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -224,3 +226,181 @@ def test_compute_file_hash_deterministic(tmp_path: Path) -> None:
     second = gen_scenarios.compute_file_hash(file_path)
 
     assert first == second
+
+
+# --- Tests for peer dropout ---
+
+
+def _make_routes_tree_5_vehicles() -> ET.ElementTree:
+    xml = """
+    <routes>
+        <vType id="car" accel="2.6" decel="4.5" sigma="0.5" length="5" maxSpeed="50" tau="1.0"/>
+        <vehicle id="V005" type="car" depart="0"/>
+        <vehicle id="V004" type="car" depart="0"/>
+        <vehicle id="V003" type="car" depart="0"/>
+        <vehicle id="V002" type="car" depart="0"/>
+        <vehicle id="V001" type="car" depart="0"/>
+    </routes>
+    """
+    return ET.ElementTree(ET.fromstring(xml))
+
+
+def test_apply_peer_dropout_never_drops_v001() -> None:
+    routes_tree = _make_routes_tree_5_vehicles()
+    root = routes_tree.getroot()
+    rng = np.random.default_rng(42)
+
+    gen_scenarios.apply_peer_dropout(root, rng, drop_prob=1.0, min_peers=0)
+
+    vehicle_ids = [v.get("id") for v in root.findall("vehicle")]
+    assert "V001" in vehicle_ids
+
+
+def test_apply_peer_dropout_respects_min_peers() -> None:
+    routes_tree = _make_routes_tree_5_vehicles()
+    root = routes_tree.getroot()
+    rng = np.random.default_rng(42)
+
+    peer_count = gen_scenarios.apply_peer_dropout(root, rng, drop_prob=1.0, min_peers=2)
+
+    assert peer_count >= 2
+    vehicle_ids = [v.get("id") for v in root.findall("vehicle")]
+    non_v001_count = len([v for v in vehicle_ids if v != "V001"])
+    assert non_v001_count >= 2
+
+
+def test_apply_peer_dropout_zero_prob_keeps_all() -> None:
+    routes_tree = _make_routes_tree_5_vehicles()
+    root = routes_tree.getroot()
+    rng = np.random.default_rng(42)
+
+    peer_count = gen_scenarios.apply_peer_dropout(root, rng, drop_prob=0.0, min_peers=1)
+
+    assert peer_count == 4  # V002, V003, V004, V005
+
+
+def test_apply_peer_dropout_produces_variation() -> None:
+    """With non-zero drop_prob, different seeds should produce different results."""
+    peer_counts = set()
+    for seed in range(10):
+        routes_tree = _make_routes_tree_5_vehicles()
+        root = routes_tree.getroot()
+        rng = np.random.default_rng(seed)
+        count = gen_scenarios.apply_peer_dropout(root, rng, drop_prob=0.5, min_peers=1)
+        peer_counts.add(count)
+
+    # With 50% drop prob over 10 trials, we should see variation
+    assert len(peer_counts) > 1
+
+
+# --- Tests for route randomization ---
+
+
+def _make_routes_tree_with_multiple_routes() -> ET.ElementTree:
+    xml = """
+    <routes>
+        <vType id="car" accel="2.6" decel="4.5" sigma="0.5" length="5" maxSpeed="50" tau="1.0"/>
+        <route id="route_main" edges="edge1 edge2"/>
+        <route id="route_alt1" edges="edge3 edge4"/>
+        <route id="route_alt2" edges="edge5 edge6"/>
+        <vehicle id="V003" type="car" depart="0" route="route_main"/>
+        <vehicle id="V002" type="car" depart="0" route="route_main"/>
+        <vehicle id="V001" type="car" depart="0" route="route_main"/>
+    </routes>
+    """
+    return ET.ElementTree(ET.fromstring(xml))
+
+
+def test_randomize_routes_excludes_v001_by_default() -> None:
+    routes_tree = _make_routes_tree_with_multiple_routes()
+    root = routes_tree.getroot()
+    rng = np.random.default_rng(42)
+
+    gen_scenarios.randomize_routes(root, rng, include_v001=False)
+
+    v001 = root.find("vehicle[@id='V001']")
+    assert v001.get("route") == "route_main"
+
+
+def test_randomize_routes_includes_v001_when_requested() -> None:
+    """With include_v001=True, V001's route may change (depends on RNG)."""
+    changed_v001 = False
+    for seed in range(20):
+        routes_tree = _make_routes_tree_with_multiple_routes()
+        root = routes_tree.getroot()
+        rng = np.random.default_rng(seed)
+        gen_scenarios.randomize_routes(root, rng, include_v001=True)
+        v001 = root.find("vehicle[@id='V001']")
+        if v001.get("route") != "route_main":
+            changed_v001 = True
+            break
+
+    assert changed_v001, "V001 route never changed across 20 seeds"
+
+
+def test_randomize_routes_changes_non_ego_routes() -> None:
+    """Non-V001 vehicles should get randomized routes."""
+    changed = False
+    for seed in range(20):
+        routes_tree = _make_routes_tree_with_multiple_routes()
+        root = routes_tree.getroot()
+        rng = np.random.default_rng(seed)
+        gen_scenarios.randomize_routes(root, rng, include_v001=False)
+        v002 = root.find("vehicle[@id='V002']")
+        if v002.get("route") != "route_main":
+            changed = True
+            break
+
+    assert changed, "V002 route never changed across 20 seeds"
+
+
+def test_randomize_routes_no_change_with_single_route() -> None:
+    """When only one route exists, no changes should occur."""
+    routes_tree = _make_routes_tree()  # Has no route definitions
+    root = routes_tree.getroot()
+    rng = np.random.default_rng(42)
+
+    # Should not raise, just do nothing
+    gen_scenarios.randomize_routes(root, rng, include_v001=False)
+
+
+# --- Tests for augmentation config integration ---
+
+
+def test_augment_routes_with_peer_dropout_config() -> None:
+    routes_tree = _make_routes_tree_5_vehicles()
+    rng = np.random.default_rng(42)
+    config = gen_scenarios.AugmentationConfig(
+        peer_drop_prob=0.5,
+        min_peers=1,
+    )
+
+    _, peer_count = gen_scenarios.augment_routes(
+        routes_tree,
+        rng,
+        gen_scenarios.AUGMENTATION_RANGES,
+        config,
+    )
+
+    assert 1 <= peer_count <= 4
+
+
+def test_augment_routes_with_route_randomization_config() -> None:
+    routes_tree = _make_routes_tree_with_multiple_routes()
+    rng = np.random.default_rng(42)
+    config = gen_scenarios.AugmentationConfig(
+        route_randomize_non_ego=True,
+        route_include_v001=False,
+    )
+
+    augmented, _ = gen_scenarios.augment_routes(
+        routes_tree,
+        rng,
+        gen_scenarios.AUGMENTATION_RANGES,
+        config,
+    )
+
+    # V001 should still be on route_main
+    root = augmented.getroot()
+    v001 = root.find("vehicle[@id='V001']")
+    assert v001.get("route") == "route_main"
