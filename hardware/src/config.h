@@ -83,7 +83,7 @@
 // ============================================================================
 
 // ESP-NOW settings
-#define ESPNOW_CHANNEL          1
+#define ESPNOW_CHANNEL          6
 #define ESPNOW_MAX_PAYLOAD      250   // bytes
 #define ESPNOW_RETRY_COUNT      3
 

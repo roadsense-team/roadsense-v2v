@@ -22,9 +22,10 @@ import json
 import os
 import re
 import subprocess
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -37,6 +38,16 @@ AUGMENTATION_RANGES = {
     "tau": (0.5, 1.5),
     "spawn_jitter_s": (0.0, 2.0),
 }
+
+
+@dataclass
+class AugmentationConfig:
+    """Configuration for scenario augmentation features."""
+
+    peer_drop_prob: float = 0.0
+    min_peers: int = 1
+    route_randomize_non_ego: bool = False
+    route_include_v001: bool = False
 
 
 def _strip_namespaces(tree: ET.ElementTree) -> None:
@@ -92,7 +103,8 @@ def augment_routes(
     routes_tree: ET.ElementTree,
     rng: np.random.Generator,
     params: Dict[str, Tuple[float, float]],
-) -> ET.ElementTree:
+    config: Optional[AugmentationConfig] = None,
+) -> Tuple[ET.ElementTree, int]:
     """
     Apply augmentation to vehicles.rou.xml.
 
@@ -100,17 +112,33 @@ def augment_routes(
         routes_tree: Parsed XML tree
         rng: NumPy random generator (seeded)
         params: Dict of {param_name: (min, max)} ranges
+        config: Optional augmentation config for peer dropout and route randomization
 
     Returns:
-        Modified XML tree
+        Tuple of (modified XML tree, number of peers remaining)
 
     Modifications:
-        1. Modify <vType> attributes: speedFactor, sigma, decel, tau
-        2. Jitter <vehicle depart="..."> times (except V001)
+        1. Apply peer dropout (if configured)
+        2. Randomize routes (if configured)
+        3. Modify <vType> attributes: speedFactor, sigma, decel, tau
+        4. Jitter <vehicle depart="..."> times (except V001)
 
     INVARIANT: V001 depart MUST remain 0.
     """
+    if config is None:
+        config = AugmentationConfig()
+
     root = routes_tree.getroot()
+
+    peer_count = apply_peer_dropout(
+        root,
+        rng,
+        config.peer_drop_prob,
+        config.min_peers,
+    )
+
+    if config.route_randomize_non_ego:
+        randomize_routes(root, rng, config.route_include_v001)
 
     vtype_values = {
         name: rng.uniform(*params[name])
@@ -137,7 +165,7 @@ def augment_routes(
 
     _sort_vehicles_by_depart(root)
 
-    return routes_tree
+    return routes_tree, peer_count
 
 
 def _sort_vehicles_by_depart(root: ET.Element) -> None:
@@ -165,6 +193,81 @@ def _sort_vehicles_by_depart(root: ET.Element) -> None:
 
     for offset, vehicle in enumerate(sorted(vehicles, key=_sort_key)):
         root.insert(first_vehicle_index + offset, vehicle)
+
+
+def apply_peer_dropout(
+    root: ET.Element,
+    rng: np.random.Generator,
+    drop_prob: float,
+    min_peers: int,
+) -> int:
+    """
+    Remove non-V001 vehicles with given probability, keeping at least min_peers.
+
+    Args:
+        root: Root element of vehicles.rou.xml
+        rng: NumPy random generator (seeded)
+        drop_prob: Probability of dropping each peer vehicle
+        min_peers: Minimum number of peers to keep (excluding V001)
+
+    Returns:
+        Number of peers remaining after dropout
+
+    INVARIANT: V001 is NEVER dropped.
+    """
+    if drop_prob <= 0.0:
+        vehicles = [v for v in root.findall("vehicle") if v.get("id") != "V001"]
+        return len(vehicles)
+
+    vehicles = root.findall("vehicle")
+    peers = [v for v in vehicles if v.get("id") != "V001"]
+
+    if not peers:
+        return 0
+
+    candidates_to_drop = []
+    for peer in peers:
+        if rng.random() < drop_prob:
+            candidates_to_drop.append(peer)
+
+    max_drops = max(0, len(peers) - min_peers)
+    to_drop = candidates_to_drop[:max_drops]
+
+    for vehicle in to_drop:
+        root.remove(vehicle)
+
+    return len(peers) - len(to_drop)
+
+
+def randomize_routes(
+    root: ET.Element,
+    rng: np.random.Generator,
+    include_v001: bool,
+) -> None:
+    """
+    Randomly assign routes to vehicles from available route definitions.
+
+    Args:
+        root: Root element of vehicles.rou.xml
+        rng: NumPy random generator (seeded)
+        include_v001: If True, also randomize V001's route
+
+    NOTE: Only works if multiple <route> elements are defined in the file.
+    """
+    routes = root.findall("route")
+    if len(routes) < 2:
+        return
+
+    route_ids = [r.get("id") for r in routes if r.get("id")]
+    if not route_ids:
+        return
+
+    for vehicle in root.findall("vehicle"):
+        vehicle_id = vehicle.get("id")
+        if vehicle_id == "V001" and not include_v001:
+            continue
+        new_route = rng.choice(route_ids)
+        vehicle.set("route", new_route)
 
 
 def write_scenario(
@@ -263,6 +366,8 @@ def write_manifest(
     train_scenarios: List[str],
     eval_scenarios: List[str],
     augmentation_ranges: Dict[str, Tuple[float, float]],
+    augmentation_config: Optional[AugmentationConfig] = None,
+    peer_count_distribution: Optional[Dict[int, int]] = None,
 ) -> None:
     """
     Write manifest.json with full reproducibility metadata.
@@ -275,6 +380,8 @@ def write_manifest(
         train_scenarios: List of train scenario IDs
         eval_scenarios: List of eval scenario IDs
         augmentation_ranges: Dict of augmentation parameter ranges
+        augmentation_config: Optional config for peer dropout and route randomization
+        peer_count_distribution: Optional dict of {peer_count: scenario_count}
 
     File written: {output_dir}/manifest.json
     """
@@ -296,6 +403,7 @@ def write_manifest(
         "augmentation_ranges": {
             key: list(value) for key, value in augmentation_ranges.items()
         },
+        "augmentation_config": asdict(augmentation_config) if augmentation_config else {},
         "train_scenarios": train_scenarios,
         "eval_scenarios": eval_scenarios,
         "emulator_params": {
@@ -308,6 +416,11 @@ def write_manifest(
             "container_image": _get_container_image(),
         },
     }
+
+    if peer_count_distribution:
+        manifest["peer_count_distribution"] = {
+            str(k): v for k, v in sorted(peer_count_distribution.items())
+        }
 
     manifest_path = output_dir / "manifest.json"
     with manifest_path.open("w", encoding="utf-8") as file_handle:
@@ -358,6 +471,28 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("ml/espnow_emulator/emulator_params_5m.json"),
     )
+    parser.add_argument(
+        "--peer_drop_prob",
+        type=float,
+        default=0.0,
+        help="Probability of dropping each non-V001 vehicle (0.0-1.0)",
+    )
+    parser.add_argument(
+        "--min_peers",
+        type=int,
+        default=1,
+        help="Minimum number of peers to keep after dropout",
+    )
+    parser.add_argument(
+        "--route_randomize_non_ego",
+        action="store_true",
+        help="Randomize route assignment for non-V001 vehicles",
+    )
+    parser.add_argument(
+        "--route_include_v001",
+        action="store_true",
+        help="Include V001 in route randomization (requires --route_randomize_non_ego)",
+    )
     return parser.parse_args()
 
 
@@ -366,6 +501,12 @@ def main() -> None:
 
     if args.train_count < 0 or args.eval_count < 0:
         raise ValueError("train_count and eval_count must be non-negative.")
+
+    if args.peer_drop_prob < 0.0 or args.peer_drop_prob > 1.0:
+        raise ValueError("peer_drop_prob must be between 0.0 and 1.0.")
+
+    if args.min_peers < 0:
+        raise ValueError("min_peers must be non-negative.")
 
     base_dir = args.base_dir
     output_dir = args.output_dir
@@ -378,18 +519,28 @@ def main() -> None:
     train_dir.mkdir(parents=True, exist_ok=True)
     eval_dir.mkdir(parents=True, exist_ok=True)
 
+    aug_config = AugmentationConfig(
+        peer_drop_prob=args.peer_drop_prob,
+        min_peers=args.min_peers,
+        route_randomize_non_ego=args.route_randomize_non_ego,
+        route_include_v001=args.route_include_v001,
+    )
+
     rng = np.random.default_rng(args.seed)
     train_scenarios: List[str] = []
     eval_scenarios: List[str] = []
+    peer_count_distribution: Dict[int, int] = {}
 
     for idx in range(args.train_count):
         scenario_id = f"train_{idx:03d}"
         train_scenarios.append(scenario_id)
-        augmented_routes = augment_routes(
+        augmented_routes, peer_count = augment_routes(
             copy.deepcopy(routes_tree),
             rng,
             AUGMENTATION_RANGES,
+            aug_config,
         )
+        peer_count_distribution[peer_count] = peer_count_distribution.get(peer_count, 0) + 1
         write_scenario(
             train_dir,
             scenario_id,
@@ -404,11 +555,13 @@ def main() -> None:
     for idx in range(args.eval_count):
         scenario_id = f"eval_{idx:03d}"
         eval_scenarios.append(scenario_id)
-        augmented_routes = augment_routes(
+        augmented_routes, peer_count = augment_routes(
             copy.deepcopy(routes_tree),
             rng,
             AUGMENTATION_RANGES,
+            aug_config,
         )
+        peer_count_distribution[peer_count] = peer_count_distribution.get(peer_count, 0) + 1
         write_scenario(
             eval_dir,
             scenario_id,
@@ -428,7 +581,12 @@ def main() -> None:
         train_scenarios=train_scenarios,
         eval_scenarios=eval_scenarios,
         augmentation_ranges=AUGMENTATION_RANGES,
+        augmentation_config=aug_config,
+        peer_count_distribution=peer_count_distribution,
     )
+
+    print(f"Generated {len(train_scenarios)} train + {len(eval_scenarios)} eval scenarios")
+    print(f"Peer count distribution: {peer_count_distribution}")
 
 
 if __name__ == "__main__":

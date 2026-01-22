@@ -56,7 +56,7 @@
 using ImuData = IImuSensor::ImuData;
 
 // ESP-NOW
-#define ESPNOW_CHANNEL    1
+#define ESPNOW_CHANNEL    6
 
 // =============================================================================
 // RTT Configuration
