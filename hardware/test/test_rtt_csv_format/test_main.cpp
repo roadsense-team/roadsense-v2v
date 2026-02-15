@@ -7,7 +7,7 @@
  *
  * Critical Requirements:
  * - CSV header must exactly match analysis script expectations
- * - CSV row format must have 12 columns
+ * - CSV row format must have 15 columns
  * - Float precision must be sufficient for analysis
  * - Lost packets must be marked with -1 values
  */
@@ -36,7 +36,7 @@ void tearDown(void) {
  * CRITICAL: Python analysis script depends on this exact format
  */
 void test_csv_header_exact_match() {
-    const char* expected = "sequence,send_time_ms,recv_time_ms,rtt_ms,lat,lon,speed,heading,accel_x,accel_y,accel_z,lost\n";
+    const char* expected = "sequence,send_time_ms,recv_time_ms,rtt_ms,lat,lon,speed,heading,accel_x,accel_y,accel_z,mag_x,mag_y,mag_z,lost\n";
 
     char buffer[256];
     generateCSVHeader(buffer, sizeof(buffer));
@@ -51,9 +51,9 @@ void test_csv_header_column_count() {
     char buffer[256];
     generateCSVHeader(buffer, sizeof(buffer));
 
-    // Count commas (11 commas = 12 columns)
+    // Count commas (14 commas = 15 columns)
     int commas = countChar(buffer, ',');
-    TEST_ASSERT_EQUAL_INT(11, commas);
+    TEST_ASSERT_EQUAL_INT(14, commas);
 }
 
 /**
@@ -71,17 +71,19 @@ void test_csv_row_received_packet() {
     record.accel_x = -0.05f;
     record.accel_y = 0.12f;
     record.accel_z = 9.81f;
+    record.mag_x = 21.4f;
+    record.mag_y = -4.8f;
+    record.mag_z = 39.0f;
     record.received = true;
 
     char line[256];
     formatCSVRow(line, sizeof(line), &record);
 
-    // Expected: sequence,send_time_ms,recv_time_ms,rtt_ms,lat,lon,speed,heading,accel_x,accel_y,accel_z,lost
-    // 42,1000,1007,7,32.085123,34.781234,15.50,45.2,-0.050,0.120,9.810,0
+    // Expected: ...accel_x,accel_y,accel_z,mag_x,mag_y,mag_z,lost
 
-    // Verify has 12 columns (11 commas)
+    // Verify has 15 columns (14 commas)
     int commas = countChar(line, ',');
-    TEST_ASSERT_EQUAL_INT(11, commas);
+    TEST_ASSERT_EQUAL_INT(14, commas);
 
     // Verify line ends with newline
     size_t len = strlen(line);
@@ -111,17 +113,20 @@ void test_csv_row_lost_packet() {
     record.accel_x = 0.01f;
     record.accel_y = -0.02f;
     record.accel_z = 9.80f;
+    record.mag_x = 20.5f;
+    record.mag_y = -3.7f;
+    record.mag_z = 37.9f;
     record.received = false;
 
     char line[256];
     formatCSVRow(line, sizeof(line), &record);
 
-    // Expected: 100,2000,-1,-1,32.085125,34.781236,10.00,90.0,0.010,-0.020,9.800,1
+    // Expected: ...,-0.020,9.800,20.500,-3.700,37.900,1
     // recv_time_ms = -1, rtt_ms = -1, lost = 1
 
-    // Verify has 12 columns
+    // Verify has 15 columns
     int commas = countChar(line, ',');
-    TEST_ASSERT_EQUAL_INT(11, commas);
+    TEST_ASSERT_EQUAL_INT(14, commas);
 
     // Verify contains -1 for recv_time and rtt
     TEST_ASSERT_TRUE(strstr(line, ",-1,-1,") != NULL);
@@ -158,6 +163,9 @@ void test_gps_precision() {
     record.accel_x = 0.0f;
     record.accel_y = 0.0f;
     record.accel_z = 9.81f;
+    record.mag_x = 0.0f;
+    record.mag_y = 0.0f;
+    record.mag_z = 0.0f;
     record.received = true;
 
     char line[256];
@@ -176,6 +184,9 @@ void test_imu_precision() {
     record.accel_x = -0.050f;
     record.accel_y = 0.125f;
     record.accel_z = 9.810f;
+    record.mag_x = 21.125f;
+    record.mag_y = -2.500f;
+    record.mag_z = 40.250f;
     record.sequence = 0;
     record.send_time_ms = 1000;
     record.recv_time_ms = 1010;
@@ -192,6 +203,9 @@ void test_imu_precision() {
     TEST_ASSERT_TRUE(strstr(line, "0.050") != NULL || strstr(line, "-0.050") != NULL);
     TEST_ASSERT_TRUE(strstr(line, "0.125") != NULL);
     TEST_ASSERT_TRUE(strstr(line, "9.810") != NULL);
+    TEST_ASSERT_TRUE(strstr(line, "21.125") != NULL);
+    TEST_ASSERT_TRUE(strstr(line, "-2.500") != NULL);
+    TEST_ASSERT_TRUE(strstr(line, "40.250") != NULL);
 }
 
 /**
@@ -209,17 +223,20 @@ void test_buffer_overflow_protection() {
     record.accel_x = 100.0f;
     record.accel_y = 100.0f;
     record.accel_z = 100.0f;
+    record.mag_x = 1000.0f;
+    record.mag_y = 1000.0f;
+    record.mag_z = 1000.0f;
     record.received = true;
 
     // Use small buffer to test overflow protection
-    char line[200];
+    char line[240];
     formatCSVRow(line, sizeof(line), &record);
 
     // Verify buffer is null-terminated
-    TEST_ASSERT_EQUAL_CHAR('\0', line[199]);
+    TEST_ASSERT_EQUAL_CHAR('\0', line[239]);
 
     // Verify line length doesn't exceed buffer
-    TEST_ASSERT_LESS_THAN_INT(200, strlen(line));
+    TEST_ASSERT_LESS_THAN_INT(240, strlen(line));
 }
 
 /**
@@ -235,7 +252,7 @@ void test_zero_values() {
 
     // Should produce valid CSV with zeros
     int commas = countChar(line, ',');
-    TEST_ASSERT_EQUAL_INT(11, commas);
+    TEST_ASSERT_EQUAL_INT(14, commas);
 
     // Should end with ,0 (lost=0 because received=true)
     TEST_ASSERT_TRUE(strstr(line, ",0\n") != NULL);
@@ -257,6 +274,9 @@ void test_csv_format_parseable() {
     record.accel_x = -0.05f;
     record.accel_y = 0.12f;
     record.accel_z = 9.81f;
+    record.mag_x = 21.5f;
+    record.mag_y = -4.9f;
+    record.mag_z = 39.2f;
     record.received = true;
 
     char line[256];

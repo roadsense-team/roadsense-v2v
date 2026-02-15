@@ -51,7 +51,12 @@ void test_rtt_packet_is_properly_packed() {
     TEST_ASSERT_EQUAL_INT(24, offsetof(RTTPacket, accel_x));
     TEST_ASSERT_EQUAL_INT(28, offsetof(RTTPacket, accel_y));
     TEST_ASSERT_EQUAL_INT(32, offsetof(RTTPacket, accel_z));
-    TEST_ASSERT_EQUAL_INT(36, offsetof(RTTPacket, padding));
+    TEST_ASSERT_EQUAL_INT(36, offsetof(RTTPacket, mag_x));
+    TEST_ASSERT_EQUAL_INT(40, offsetof(RTTPacket, mag_y));
+    TEST_ASSERT_EQUAL_INT(44, offsetof(RTTPacket, mag_z));
+    TEST_ASSERT_EQUAL_INT(48, offsetof(RTTPacket, gps_hdop));
+    TEST_ASSERT_EQUAL_INT(52, offsetof(RTTPacket, gps_satellites));
+    TEST_ASSERT_EQUAL_INT(53, offsetof(RTTPacket, padding));
 }
 
 /**
@@ -70,6 +75,11 @@ void test_rtt_packet_initialization() {
     pkt.accel_x = -0.05f;
     pkt.accel_y = 0.12f;
     pkt.accel_z = 9.81f;
+    pkt.mag_x = 21.2f;
+    pkt.mag_y = -5.4f;
+    pkt.mag_z = 40.7f;
+    pkt.gps_hdop = 1.3f;
+    pkt.gps_satellites = 9;
     memset(pkt.padding, 0xAA, sizeof(pkt.padding));
 
     // Verify all fields
@@ -82,8 +92,13 @@ void test_rtt_packet_initialization() {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, -0.05f, pkt.accel_x);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.12f, pkt.accel_y);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 9.81f, pkt.accel_z);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 21.2f, pkt.mag_x);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, -5.4f, pkt.mag_y);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 40.7f, pkt.mag_z);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.3f, pkt.gps_hdop);
+    TEST_ASSERT_EQUAL_UINT8(9, pkt.gps_satellites);
     TEST_ASSERT_EQUAL_UINT8(0xAA, pkt.padding[0]);
-    TEST_ASSERT_EQUAL_UINT8(0xAA, pkt.padding[53]);
+    TEST_ASSERT_EQUAL_UINT8(0xAA, pkt.padding[36]);
 }
 
 /**
@@ -104,6 +119,11 @@ void test_rtt_packet_serialization() {
     sourcePacket.accel_x = 0.10f;
     sourcePacket.accel_y = -0.05f;
     sourcePacket.accel_z = 9.78f;
+    sourcePacket.mag_x = 19.9f;
+    sourcePacket.mag_y = -3.2f;
+    sourcePacket.mag_z = 38.6f;
+    sourcePacket.gps_hdop = 0.9f;
+    sourcePacket.gps_satellites = 11;
     memset(sourcePacket.padding, 0xBB, sizeof(sourcePacket.padding));
 
     // Simulate ESP-NOW transmission (serialize to byte buffer)
@@ -124,6 +144,11 @@ void test_rtt_packet_serialization() {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.10f, receivedPacket.accel_x);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, -0.05f, receivedPacket.accel_y);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 9.78f, receivedPacket.accel_z);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 19.9f, receivedPacket.mag_x);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, -3.2f, receivedPacket.mag_y);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 38.6f, receivedPacket.mag_z);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.9f, receivedPacket.gps_hdop);
+    TEST_ASSERT_EQUAL_UINT8(11, receivedPacket.gps_satellites);
     TEST_ASSERT_EQUAL_UINT8(0xBB, receivedPacket.padding[0]);
 }
 
@@ -145,7 +170,21 @@ void test_rtt_packet_has_imu_fields() {
 }
 
 /**
- * TEST 6: Verify GPS fields are present (REQUIRED for distance correlation)
+ * TEST 6: Verify magnetometer fields are present
+ */
+void test_rtt_packet_has_mag_fields() {
+    RTTPacket pkt;
+    pkt.mag_x = 1.5f;
+    pkt.mag_y = -2.1f;
+    pkt.mag_z = 0.7f;
+
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.5f, pkt.mag_x);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, -2.1f, pkt.mag_y);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.7f, pkt.mag_z);
+}
+
+/**
+ * TEST 7: Verify GPS fields are present (REQUIRED for distance correlation)
  */
 void test_rtt_packet_has_gps_fields() {
     RTTPacket pkt;
@@ -164,18 +203,18 @@ void test_rtt_packet_has_gps_fields() {
 }
 
 /**
- * TEST 7: Verify padding size is correct
+ * TEST 8: Verify padding size is correct
  */
 void test_rtt_packet_padding_size() {
     // Total packet size: 90 bytes
-    // Fields: 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 = 36 bytes
-    // Padding: 90 - 36 = 54 bytes
+    // Fields: 53 bytes (with mag + GPS quality)
+    // Padding: 90 - 53 = 37 bytes
     RTTPacket pkt;
-    TEST_ASSERT_EQUAL_INT(54, sizeof(pkt.padding));
+    TEST_ASSERT_EQUAL_INT(37, sizeof(pkt.padding));
 }
 
 /**
- * TEST 8: Verify packet can be used with ESP-NOW send/receive
+ * TEST 9: Verify packet can be used with ESP-NOW send/receive
  * (Mock test - actual ESP-NOW tested in integration)
  */
 void test_rtt_packet_espnow_compatibility() {
@@ -204,6 +243,7 @@ void setup() {
     RUN_TEST(test_rtt_packet_initialization);
     RUN_TEST(test_rtt_packet_serialization);
     RUN_TEST(test_rtt_packet_has_imu_fields);
+    RUN_TEST(test_rtt_packet_has_mag_fields);
     RUN_TEST(test_rtt_packet_has_gps_fields);
     RUN_TEST(test_rtt_packet_padding_size);
     RUN_TEST(test_rtt_packet_espnow_compatibility);

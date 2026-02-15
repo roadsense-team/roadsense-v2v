@@ -9,9 +9,21 @@
 #include <unity.h>
 #include <Arduino.h>
 #include <WiFi.h>
+#include <cstring>
 #include "../../src/logging/DataLogger.h"
 #include "../../src/network/protocol/V2VMessage.h"
 #include "../../include/IGpsSensor.h"
+
+int countCommas(const char* value) {
+    int count = 0;
+    while (*value != '\0') {
+        if (*value == ',') {
+            count++;
+        }
+        value++;
+    }
+    return count;
+}
 
 // Mock GPS data for testing
 IGpsSensor::GpsData createMockGpsData(bool valid = true, uint32_t ageMs = 100) {
@@ -52,9 +64,9 @@ V2VMessage createMockV2VMessage() {
     msg.sensors.gyro[1] = -0.01f;
     msg.sensors.gyro[2] = 0.05f;
 
-    msg.sensors.mag[0] = 0.0f;  // No magnetometer yet
-    msg.sensors.mag[1] = 0.0f;
-    msg.sensors.mag[2] = 0.0f;
+    msg.sensors.mag[0] = 21.5f;
+    msg.sensors.mag[1] = -4.2f;
+    msg.sensors.mag[2] = 38.9f;
 
     msg.alert.riskLevel = 0;
     msg.alert.scenarioType = 0;
@@ -96,6 +108,32 @@ void test_csv_row_format() {
 
     // We'll verify this during full SD card integration test
     TEST_PASS();
+}
+
+// ============================================================================
+// TEST 1B: Mode 1 TX row has expected 16 columns
+// ============================================================================
+void test_mode1_tx_row_column_count() {
+    V2VMessage msg = createMockV2VMessage();
+    char row[320];
+
+    size_t written = DataLogger::formatCharacterizationTxRow(row, sizeof(row), 123456, msg);
+    TEST_ASSERT_GREATER_THAN(0, (int)written);
+    TEST_ASSERT_EQUAL_INT(15, countCommas(row)); // 16 columns = 15 commas
+    TEST_ASSERT_TRUE(strstr(row, "21.50") != NULL);  // mag_x value present
+}
+
+// ============================================================================
+// TEST 1C: Mode 1 RX row has expected 16 columns
+// ============================================================================
+void test_mode1_rx_row_column_count() {
+    V2VMessage msg = createMockV2VMessage();
+    char row[320];
+
+    size_t written = DataLogger::formatCharacterizationRxRow(row, sizeof(row), 123457, msg);
+    TEST_ASSERT_GREATER_THAN(0, (int)written);
+    TEST_ASSERT_EQUAL_INT(15, countCommas(row)); // 16 columns = 15 commas
+    TEST_ASSERT_TRUE(strstr(row, "-4.20") != NULL); // mag_y value present
 }
 
 // ============================================================================
@@ -224,7 +262,7 @@ void test_v2v_message_csv_compatibility() {
 
     // Sensors
     TEST_ASSERT_FLOAT_WITHIN(0.1, 9.81, msg.sensors.accel[2]);
-    TEST_ASSERT_FLOAT_WITHIN(0.01, 0.0, msg.sensors.mag[0]);  // No magnetometer
+    TEST_ASSERT_FLOAT_WITHIN(0.01, 21.5, msg.sensors.mag[0]);
 
     TEST_MESSAGE("V2VMessage structure matches CSV format");
 }
@@ -266,6 +304,8 @@ void setup() {
     RUN_TEST(test_v2v_message_csv_compatibility);
     RUN_TEST(test_error_handling_simulation);
     RUN_TEST(test_csv_row_format);
+    RUN_TEST(test_mode1_tx_row_column_count);
+    RUN_TEST(test_mode1_rx_row_column_count);
 
     // This test requires SD card (may fail at home if no card inserted)
     RUN_TEST(test_session_counter);

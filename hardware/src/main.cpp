@@ -16,6 +16,7 @@
 #include "config.h"
 #include "utils/Logger.h"
 #include "sensors/imu/MPU6500Driver.h"
+#include "sensors/mag/QMC5883LDriver.h"
 #include "sensors/gps/NEO6M_Driver.h"
 #include "network/transport/EspNowTransport.h"
 #include "network/protocol/V2VMessage.h"
@@ -25,9 +26,11 @@
 // GLOBAL OBJECTS
 // ============================================================================
 MPU6500Driver imu;
+QMC5883LDriver mag;
 NEO6M_Driver gps;
 EspNowTransport transport;
 DataLogger dataLogger;
+bool magInitialized = false;
 
 // Timer variables
 uint32_t lastBroadcastTime = 0;
@@ -130,7 +133,20 @@ V2VMessage buildV2VMessage() {
     // Raw Sensor Data (RoadSense Extension)
     memcpy(msg.sensors.accel, imuData.accel, sizeof(float) * 3);
     memcpy(msg.sensors.gyro, imuData.gyro, sizeof(float) * 3);
-    memset(msg.sensors.mag, 0, sizeof(float) * 3); // No magnetometer
+    if (magInitialized) {
+        float magX = 0.0f;
+        float magY = 0.0f;
+        float magZ = 0.0f;
+        if (mag.read(magX, magY, magZ)) {
+            msg.sensors.mag[0] = magX;
+            msg.sensors.mag[1] = magY;
+            msg.sensors.mag[2] = magZ;
+        } else {
+            memset(msg.sensors.mag, 0, sizeof(float) * 3);
+        }
+    } else {
+        memset(msg.sensors.mag, 0, sizeof(float) * 3);
+    }
     
     // Hazard Alert (Placeholder / Future ML)
     msg.alert.riskLevel = 0; // None
@@ -203,6 +219,13 @@ void setup() {
         // Don't halt, try to continue with other systems
     } else {
         log.info("MAIN", "✅ IMU Initialized");
+    }
+
+    magInitialized = mag.begin(Wire);
+    if (!magInitialized) {
+        log.warning("MAIN", "⚠️ QMC5883L init failed - magnetometer fields will remain zero");
+    } else {
+        log.info("MAIN", "✅ QMC5883L Initialized");
     }
     
     if (!gps.begin()) {

@@ -40,6 +40,9 @@ REQUIRED_COLUMNS = [
     "accel_x",
     "accel_y",
     "accel_z",
+    "mag_x",
+    "mag_y",
+    "mag_z",
     "lost",
 ]
 
@@ -66,6 +69,9 @@ class RTTRecord:
     accel_x: float
     accel_y: float
     accel_z: float
+    mag_x: float
+    mag_y: float
+    mag_z: float
     lost: int
 
 
@@ -101,6 +107,9 @@ def load_records(path: Path) -> List[RTTRecord]:
                     accel_x=_parse_float(row["accel_x"]),
                     accel_y=_parse_float(row["accel_y"]),
                     accel_z=_parse_float(row["accel_z"]),
+                    mag_x=_parse_float(row["mag_x"]),
+                    mag_y=_parse_float(row["mag_y"]),
+                    mag_z=_parse_float(row["mag_z"]),
                     lost=_parse_int(row["lost"]),
                 )
             except (TypeError, ValueError):
@@ -354,6 +363,42 @@ def compute_gps_noise(
     }
 
 
+def compute_mag_noise(
+    records: List[RTTRecord],
+    stationary_speed: float,
+) -> Dict[str, float]:
+    if not records:
+        return {}
+
+    speeds = np.array([r.speed for r in records], dtype=float)
+    mask = speeds <= stationary_speed
+    if mask.sum() < 5:
+        return {}
+
+    mx = np.array([r.mag_x for r in records], dtype=float)[mask]
+    my = np.array([r.mag_y for r in records], dtype=float)[mask]
+    mz = np.array([r.mag_z for r in records], dtype=float)[mask]
+    if mx.size < 5:
+        return {}
+
+    std_x = float(np.std(mx, ddof=1)) if mx.size > 1 else 0.0
+    std_y = float(np.std(my, ddof=1)) if my.size > 1 else 0.0
+    std_z = float(np.std(mz, ddof=1)) if mz.size > 1 else 0.0
+    mag_std_ut = float(np.mean([std_x, std_y, std_z]))
+
+    heading_from_mag_deg = np.degrees(np.arctan2(my, mx))
+    heading_std_deg = circular_std_deg(heading_from_mag_deg)
+
+    return {
+        "samples": int(mask.sum()),
+        "mag_std_x": std_x,
+        "mag_std_y": std_y,
+        "mag_std_z": std_z,
+        "mag_std_ut": mag_std_ut,
+        "heading_std_deg": heading_std_deg if heading_std_deg is not None else float("nan"),
+    }
+
+
 def circular_std_deg(angles_deg: np.ndarray) -> Optional[float]:
     if angles_deg.size < 5:
         return None
@@ -455,6 +500,7 @@ def build_emulator_params(
     loss_segments: List[Dict[str, float]],
     burst_stats: Dict[str, float],
     accel_noise: Dict[str, float],
+    mag_noise: Dict[str, float],
     gps_noise: Dict[str, float],
     speed_std: Optional[float],
     heading_std: Optional[float],
@@ -499,6 +545,7 @@ def build_emulator_params(
     ]))
 
     gps_std_m = gps_noise.get("gps_std_m", 5.0)
+    mag_std_ut = mag_noise.get("mag_std_ut", 1.0)
     speed_std_ms = speed_std if speed_std is not None else 0.5
     heading_std_deg = heading_std if heading_std is not None else 3.0
 
@@ -533,6 +580,7 @@ def build_emulator_params(
             "gps_std_m": float(gps_std_m),
             "speed_std_ms": float(speed_std_ms),
             "accel_std_ms2": float(accel_std),
+            "mag_std_ut": float(mag_std_ut),
             "heading_std_deg": float(heading_std_deg),
             "gyro_std_rad_s": 0.01,
         },
@@ -577,7 +625,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Analyze RTT characterization CSV and build emulator params.")
     parser.add_argument("--input", type=Path, default=default_input_path(), help="Path to rtt_log.csv")
     parser.add_argument("--out-dir", type=Path, default=Path(__file__).resolve().parent / "../data/rtt_analysis")
-    parser.add_argument("--params-out", type=Path, default=Path(__file__).resolve().parent / "../espnow_emulator/emulator_params.json")
+    parser.add_argument("--params-out", type=Path, default=Path(__file__).resolve().parent / "../espnow_emulator/emulator_params_measured.json")
     parser.add_argument("--segment-seconds", type=int, default=10, help="Time bin size for loss analysis (seconds)")
     parser.add_argument("--stationary-speed-ms", type=float, default=0.5, help="Speed threshold for stationary noise")
     parser.add_argument("--heading-min-speed-ms", type=float, default=2.0, help="Speed threshold for heading noise")
@@ -618,12 +666,17 @@ def main() -> int:
 
     burst_stats = compute_burst_stats(records)
     imu_noise = compute_imu_noise(records, args.stationary_speed_ms)
+    mag_noise = compute_mag_noise(records, args.stationary_speed_ms)
     gps_noise = compute_gps_noise(records, args.stationary_speed_ms)
     speed_noise = None
     if imu_noise:
         speeds = np.array([r.speed for r in records], dtype=float)
         speed_noise = float(np.std(speeds[speeds <= args.stationary_speed_ms], ddof=1)) if (speeds <= args.stationary_speed_ms).sum() > 1 else 0.0
-    heading_noise = compute_heading_noise(records, args.heading_min_speed_ms)
+    heading_noise = mag_noise.get("heading_std_deg") if mag_noise else None
+    if heading_noise is not None and math.isnan(heading_noise):
+        heading_noise = None
+    if heading_noise is None:
+        heading_noise = compute_heading_noise(records, args.heading_min_speed_ms)
 
     high_loss_zones = find_high_loss_zones(records, loss_segments, loss_summary, args.segment_seconds)
 
@@ -637,6 +690,7 @@ def main() -> int:
         loss_segments=loss_segments,
         burst_stats=burst_stats,
         accel_noise=imu_noise,
+        mag_noise=mag_noise,
         gps_noise=gps_noise,
         speed_std=speed_noise,
         heading_std=heading_noise,
@@ -654,6 +708,7 @@ def main() -> int:
         "loss": loss_summary,
         "burst_loss": burst_stats,
         "imu_noise": imu_noise,
+        "mag_noise": mag_noise,
         "gps_noise": gps_noise,
         "speed_noise_std_ms": speed_noise,
         "heading_noise_std_deg": heading_noise,
@@ -693,6 +748,12 @@ def main() -> int:
         print(
             "  Accel noise std (m/s^2): ax={accel_x_std:.3f}, ay={accel_y_std:.3f}, az={accel_z_std:.3f}".format(
                 **imu_noise
+            )
+        )
+    if mag_noise:
+        print(
+            "  Mag noise std (uT): mx={mag_std_x:.3f}, my={mag_std_y:.3f}, mz={mag_std_z:.3f}".format(
+                **mag_noise
             )
         )
     if gps_noise:

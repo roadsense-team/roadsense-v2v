@@ -19,8 +19,10 @@
  *
  * File Format (Mode 1 - Network Characterization):
  * -------------------------------------------------
- * TX Log: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
- * RX Log: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
+ * TX Log: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,
+ *         accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z
+ * RX Log: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,
+ *         accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z
  *
  * File Format (Mode 2 - Training Data):
  * --------------------------------------
@@ -126,6 +128,20 @@ public:
      * This performs blocking SD card I/O.
      */
     void logRxMessage(const V2VMessage& msg);
+
+    /**
+     * @brief Format Mode 1 TX row into caller-provided buffer
+     * @return Number of characters written (excluding null terminator)
+     */
+    static size_t formatCharacterizationTxRow(char* outBuffer, size_t bufferSize,
+                                              uint32_t localTimestampMs, const V2VMessage& msg);
+
+    /**
+     * @brief Format Mode 1 RX row into caller-provided buffer
+     * @return Number of characters written (excluding null terminator)
+     */
+    static size_t formatCharacterizationRxRow(char* outBuffer, size_t bufferSize,
+                                              uint32_t localTimestampMs, const V2VMessage& msg);
 
     // ========================================================================
     // MODE 2: TRAINING DATA (Ego-Perspective) - FUTURE IMPLEMENTATION

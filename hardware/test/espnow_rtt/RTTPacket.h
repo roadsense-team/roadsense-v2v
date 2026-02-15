@@ -32,8 +32,17 @@ struct RTTPacket {
     float accel_y;              // Accelerometer Y (m/s²)                - 4 bytes
     float accel_z;              // Accelerometer Z (m/s²)                - 4 bytes
 
+    // Magnetometer fields (REQUIRED for heading noise characterization)
+    float mag_x;                // Magnetometer X (uT)                   - 4 bytes
+    float mag_y;                // Magnetometer Y (uT)                   - 4 bytes
+    float mag_z;                // Magnetometer Z (uT)                   - 4 bytes
+
+    // GPS quality fields
+    float gps_hdop;             // Horizontal dilution of precision      - 4 bytes
+    uint8_t gps_satellites;     // Number of satellites                  - 1 byte
+
     // Padding to match V2VMessage size (90 bytes)
-    uint8_t padding[54];        // 90 - 36 = 54 bytes
+    uint8_t padding[37];        // 90 - 53 = 37 bytes
 };
 #pragma pack(pop)
 

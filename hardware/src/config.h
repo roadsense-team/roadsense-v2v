@@ -33,6 +33,7 @@
 #define I2C_SCL_PIN       22
 #define I2C_CLOCK_HZ      400000  // 400 kHz (fast mode I2C)
 #define MPU6500_I2C_ADDR  0x68    // MPU6500 I2C address (WHO_AM_I: 0x70)
+#define QMC5883L_I2C_ADDR 0x0D    // QMC5883L magnetometer I2C address
 
 // NEO-6M GPS (UART)
 #define GPS_SERIAL_PORT   1       // Serial1 (UART1)
@@ -75,8 +76,10 @@
 // GPS heading validity (replaces magnetometer heading - MPU6500 has no compass)
 #define GPS_HEADING_MIN_SPEED_MPS  1.4f  // ~5 km/h (below this, heading unreliable)
 
-// ⚠️ Magnetometer calibration NOT APPLICABLE (MPU6500 has no magnetometer)
-// GPS heading used instead of compass heading
+// Magnetometer policy:
+// - QMC5883L provides raw magnetic field vectors (X/Y/Z)
+// - Primary vehicle heading remains GPS-derived in this firmware path
+// - Magnetometer calibration/fusion is handled in offline analysis/planned follow-up work
 
 // ============================================================================
 // NETWORK CONFIGURATION

@@ -32,6 +32,7 @@
 
 // Project drivers
 #include "sensors/imu/MPU6500Driver.h"
+#include "sensors/mag/QMC5883LDriver.h"
 #include "utils/Logger.h"
 
 // =============================================================================
@@ -75,6 +76,7 @@ RTTRecord pendingPackets[MAX_PENDING];
 
 // Hardware drivers
 MPU6500Driver imu;
+QMC5883LDriver mag;
 TinyGPSPlus gps;
 HardwareSerial& gpsSerial = Serial2;
 SdFat sd;
@@ -88,6 +90,7 @@ uint32_t sequenceNumber = 0;
 uint32_t lastSendTime = 0;
 bool sdInitialized = false;
 bool headerWritten = false;
+bool magInitialized = false;
 
 // =============================================================================
 // ESP-NOW Callbacks
@@ -266,6 +269,14 @@ bool initSensors() {
     }
     logger.info("IMU", "MPU6500 initialized");
 
+    logger.info("MAG", "Initializing QMC5883L...");
+    magInitialized = mag.begin(Wire);
+    if (!magInitialized) {
+        logger.warning("MAG", "QMC5883L initialization failed - logging zero magnetometer values");
+    } else {
+        logger.info("MAG", "QMC5883L initialized");
+    }
+
     // Initialize GPS
     logger.info("GPS", "Initializing NEO-6M...");
     gpsSerial.begin(GPS_BAUD_RATE, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
@@ -351,6 +362,22 @@ void loop() {
         packet.accel_y = imuData.accel[1];
         packet.accel_z = imuData.accel[2];
 
+        // Magnetometer data
+        if (magInitialized) {
+            mag.read(packet.mag_x, packet.mag_y, packet.mag_z);
+        }
+
+        // GPS quality
+        packet.gps_hdop = gps.hdop.isValid() ? gps.hdop.hdop() : 99.9f;
+        packet.gps_satellites = 0;
+        if (gps.satellites.isValid()) {
+            uint32_t satelliteCount = gps.satellites.value();
+            if (satelliteCount > 255) {
+                satelliteCount = 255;
+            }
+            packet.gps_satellites = static_cast<uint8_t>(satelliteCount);
+        }
+
         // Create RTTRecord for buffer
         RTTRecord record;
         memset(&record, 0, sizeof(record));
@@ -364,6 +391,9 @@ void loop() {
         record.accel_x = packet.accel_x;
         record.accel_y = packet.accel_y;
         record.accel_z = packet.accel_z;
+        record.mag_x = packet.mag_x;
+        record.mag_y = packet.mag_y;
+        record.mag_z = packet.mag_z;
         record.received = false;
 
         // Add to circular buffer
