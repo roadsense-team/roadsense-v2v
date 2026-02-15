@@ -284,7 +284,7 @@ void DataLogger::buildCsvRow(const V2VMessage& msg, const IGpsSensor::GpsData& g
         "%.2f,%.2f,"                          // long_accel, lat_accel
         "%.2f,%.2f,%.2f,"                     // accel_x, accel_y, accel_z
         "%.3f,%.3f,%.3f,"                     // gyro_x, gyro_y, gyro_z
-        "%.2f,%.2f,%.2f,"                     // mag_x, mag_y, mag_z (zeros)
+        "%.2f,%.2f,%.2f,"                     // mag_x, mag_y, mag_z
         "%d,%lu\n",                           // gps_valid, gps_age_ms
 
         // Timestamp & ID
@@ -305,7 +305,7 @@ void DataLogger::buildCsvRow(const V2VMessage& msg, const IGpsSensor::GpsData& g
         // Raw Sensors
         msg.sensors.accel[0], msg.sensors.accel[1], msg.sensors.accel[2],
         msg.sensors.gyro[0], msg.sensors.gyro[1], msg.sensors.gyro[2],
-        msg.sensors.mag[0], msg.sensors.mag[1], msg.sensors.mag[2],  // Zeros (no magnetometer)
+        msg.sensors.mag[0], msg.sensors.mag[1], msg.sensors.mag[2],
 
         // GPS Metadata
         gpsData.valid ? 1 : 0,
@@ -345,6 +345,82 @@ void DataLogger::incrementSessionNumber() {
 // ============================================================================
 // MODE 1: NETWORK CHARACTERIZATION METHODS
 // ============================================================================
+
+size_t DataLogger::formatCharacterizationTxRow(char* outBuffer, size_t bufferSize,
+                                               uint32_t localTimestampMs, const V2VMessage& msg) {
+    if (outBuffer == nullptr || bufferSize == 0) {
+        return 0;
+    }
+
+    int written = snprintf(outBuffer, bufferSize,
+        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f\n",
+        static_cast<unsigned long>(localTimestampMs),
+        static_cast<unsigned long>(msg.timestamp),
+        msg.vehicleId,
+        msg.position.lat,
+        msg.position.lon,
+        msg.dynamics.speed,
+        msg.dynamics.heading,
+        msg.sensors.accel[0],
+        msg.sensors.accel[1],
+        msg.sensors.accel[2],
+        msg.sensors.gyro[0],
+        msg.sensors.gyro[1],
+        msg.sensors.gyro[2],
+        msg.sensors.mag[0],
+        msg.sensors.mag[1],
+        msg.sensors.mag[2]
+    );
+
+    if (written < 0) {
+        outBuffer[0] = '\0';
+        return 0;
+    }
+
+    if (static_cast<size_t>(written) >= bufferSize) {
+        return bufferSize - 1;
+    }
+
+    return static_cast<size_t>(written);
+}
+
+size_t DataLogger::formatCharacterizationRxRow(char* outBuffer, size_t bufferSize,
+                                               uint32_t localTimestampMs, const V2VMessage& msg) {
+    if (outBuffer == nullptr || bufferSize == 0) {
+        return 0;
+    }
+
+    int written = snprintf(outBuffer, bufferSize,
+        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f\n",
+        static_cast<unsigned long>(localTimestampMs),
+        static_cast<unsigned long>(msg.timestamp),
+        msg.vehicleId,
+        msg.position.lat,
+        msg.position.lon,
+        msg.dynamics.speed,
+        msg.dynamics.heading,
+        msg.sensors.accel[0],
+        msg.sensors.accel[1],
+        msg.sensors.accel[2],
+        msg.sensors.gyro[0],
+        msg.sensors.gyro[1],
+        msg.sensors.gyro[2],
+        msg.sensors.mag[0],
+        msg.sensors.mag[1],
+        msg.sensors.mag[2]
+    );
+
+    if (written < 0) {
+        outBuffer[0] = '\0';
+        return 0;
+    }
+
+    if (static_cast<size_t>(written) >= bufferSize) {
+        return bufferSize - 1;
+    }
+
+    return static_cast<size_t>(written);
+}
 
 // Start network characterization logging
 bool DataLogger::startCharacterizationLogging(const char* vehicleId) {
@@ -396,26 +472,14 @@ void DataLogger::logTxMessage(const V2VMessage& msg) {
         return;
     }
 
-    unsigned long local_time = millis();
+    uint32_t local_time = millis();
 
-    // Format: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
-    char row[256];
-    snprintf(row, sizeof(row),
-        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f\n",
-        local_time,
-        msg.timestamp,
-        msg.vehicleId,
-        msg.position.lat,
-        msg.position.lon,
-        msg.dynamics.speed,
-        msg.dynamics.heading,
-        msg.sensors.accel[0],
-        msg.sensors.accel[1],
-        msg.sensors.accel[2]
-    );
+    // Format: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,
+    //         accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z
+    char row[320];
+    size_t len = formatCharacterizationTxRow(row, sizeof(row), local_time, msg);
 
     // Write immediately (no buffering for characterization - need every sample!)
-    size_t len = strlen(row);
     size_t written = m_txLogFile.write(row, len);
 
     if (written != len) {
@@ -441,26 +505,14 @@ void DataLogger::logRxMessage(const V2VMessage& msg) {
         return;
     }
 
-    unsigned long local_time = millis();
+    uint32_t local_time = millis();
 
-    // Format: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z
-    char row[256];
-    snprintf(row, sizeof(row),
-        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f\n",
-        local_time,
-        msg.timestamp,
-        msg.vehicleId,  // Sender's ID
-        msg.position.lat,
-        msg.position.lon,
-        msg.dynamics.speed,
-        msg.dynamics.heading,
-        msg.sensors.accel[0],
-        msg.sensors.accel[1],
-        msg.sensors.accel[2]
-    );
+    // Format: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,
+    //         accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z
+    char row[320];
+    size_t len = formatCharacterizationRxRow(row, sizeof(row), local_time, msg);
 
     // Write immediately
-    size_t len = strlen(row);
     size_t written = m_rxLogFile.write(row, len);
 
     if (written != len) {
@@ -553,7 +605,7 @@ bool DataLogger::createCharacterizationFiles(const char* vehicleId) {
 
 // Write TX log header
 bool DataLogger::writeTxHeader() {
-    const char* header = "timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z\n";
+    const char* header = "timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z\n";
     size_t len = strlen(header);
     size_t written = m_txLogFile.write(header, len);
 
@@ -568,7 +620,7 @@ bool DataLogger::writeTxHeader() {
 
 // Write RX log header
 bool DataLogger::writeRxHeader() {
-    const char* header = "timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z\n";
+    const char* header = "timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z\n";
     size_t len = strlen(header);
     size_t written = m_rxLogFile.write(header, len);
 

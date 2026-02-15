@@ -85,7 +85,7 @@ void test_qmc5883l_chip_id() {
     Wire.write(QMC5883L_REG_CHIP_ID);
     Wire.endTransmission(false);
 
-    Wire.requestFrom(QMC5883L_ADDR, (uint8_t)1);
+    Wire.requestFrom(static_cast<int>(QMC5883L_ADDR), 1);
 
     if (Wire.available()) {
         uint8_t chipId = Wire.read();
@@ -150,13 +150,16 @@ void test_qmc5883l_read_magnetometer() {
     Wire.write(QMC5883L_REG_XOUT_L);
     Wire.endTransmission(false);
 
-    Wire.requestFrom(QMC5883L_ADDR, (uint8_t)6);
+    Wire.requestFrom(static_cast<int>(QMC5883L_ADDR), 6);
 
     if (Wire.available() >= 6) {
-        // Read 16-bit values (LSB first, then MSB)
-        int16_t x = Wire.read() | (Wire.read() << 8);
-        int16_t y = Wire.read() | (Wire.read() << 8);
-        int16_t z = Wire.read() | (Wire.read() << 8);
+        // Read LSB then MSB explicitly to avoid undefined evaluation order
+        uint8_t xl = Wire.read(); uint8_t xh = Wire.read();
+        uint8_t yl = Wire.read(); uint8_t yh = Wire.read();
+        uint8_t zl = Wire.read(); uint8_t zh = Wire.read();
+        int16_t x = static_cast<int16_t>(xl | (xh << 8));
+        int16_t y = static_cast<int16_t>(yl | (yh << 8));
+        int16_t z = static_cast<int16_t>(zl | (zh << 8));
 
         Serial.println("Raw magnetometer data (16-bit signed):");
         Serial.printf("  X: %6d\n", x);
@@ -190,7 +193,7 @@ void test_qmc5883l_status_register() {
     Wire.write(QMC5883L_REG_STATUS);
     Wire.endTransmission(false);
 
-    Wire.requestFrom(QMC5883L_ADDR, (uint8_t)1);
+    Wire.requestFrom(static_cast<int>(QMC5883L_ADDR), 1);
 
     if (Wire.available()) {
         uint8_t status = Wire.read();

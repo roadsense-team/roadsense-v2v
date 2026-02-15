@@ -1,11 +1,14 @@
 #include <unity.h>
 #include <Arduino.h>
+#include <cmath>
 #include "sensors/imu/MPU6500Driver.h"
+#include "sensors/mag/QMC5883LDriver.h"
 #include "sensors/gps/NEO6M_Driver.h"
 #include "network/protocol/V2VMessage.h"
 #include "config.h"
 
 MPU6500Driver imu;
+QMC5883LDriver mag;
 NEO6M_Driver gps;
 
 void setUp(void) {
@@ -19,9 +22,11 @@ void tearDown(void) {
 void test_dual_initialization() {
     // Initialize both sensors to check for resource conflicts
     bool imuResult = imu.begin();
+    bool magResult = mag.begin(Wire);
     bool gpsResult = gps.begin();
     
     TEST_ASSERT_TRUE_MESSAGE(imuResult, "IMU init failed during dual-test");
+    TEST_ASSERT_TRUE_MESSAGE(magResult, "Magnetometer init failed during dual-test");
     TEST_ASSERT_TRUE_MESSAGE(gpsResult, "GPS init failed during dual-test");
 }
 
@@ -46,6 +51,10 @@ void test_data_to_v2v_message() {
     // Read from sensors
     IImuSensor::ImuData imuData = imu.read();
     IGpsSensor::GpsData gpsData = gps.read();
+    float magX = 0.0f;
+    float magY = 0.0f;
+    float magZ = 0.0f;
+    bool magReadOk = mag.read(magX, magY, magZ);
     
     // Create and populate message
     V2VMessage msg;
@@ -62,10 +71,18 @@ void test_data_to_v2v_message() {
     // Populate IMU fields
     memcpy(msg.sensors.accel, imuData.accel, sizeof(float)*3);
     memcpy(msg.sensors.gyro, imuData.gyro, sizeof(float)*3);
+    msg.sensors.mag[0] = magX;
+    msg.sensors.mag[1] = magY;
+    msg.sensors.mag[2] = magZ;
     
     // Validation
     TEST_ASSERT_EQUAL_FLOAT(gpsData.latitude, msg.position.lat);
     TEST_ASSERT_EQUAL_FLOAT(imuData.accel[0], msg.sensors.accel[0]);
+    TEST_ASSERT_TRUE_MESSAGE(magReadOk, "Mag read failed while building V2V message");
+    TEST_ASSERT_TRUE_MESSAGE((fabs(msg.sensors.mag[0]) > 0.001f) ||
+                             (fabs(msg.sensors.mag[1]) > 0.001f) ||
+                             (fabs(msg.sensors.mag[2]) > 0.001f),
+                             "V2V message magnetometer fields are all zero");
     
     // Size check again just to be sure
     TEST_ASSERT_EQUAL_INT(90, sizeof(V2VMessage));

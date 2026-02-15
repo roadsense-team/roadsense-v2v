@@ -16,14 +16,14 @@
  * @brief Generate CSV header string
  *
  * Produces exact header expected by Python analysis script:
- * "sequence,send_time_ms,recv_time_ms,rtt_ms,lat,lon,speed,heading,accel_x,accel_y,accel_z,lost\n"
+ * "sequence,send_time_ms,recv_time_ms,rtt_ms,lat,lon,speed,heading,accel_x,accel_y,accel_z,mag_x,mag_y,mag_z,lost\n"
  *
  * @param buffer Output buffer to write header to
  * @param bufferSize Size of output buffer
  */
 void generateCSVHeader(char* buffer, size_t bufferSize) {
     snprintf(buffer, bufferSize,
-        "sequence,send_time_ms,recv_time_ms,rtt_ms,lat,lon,speed,heading,accel_x,accel_y,accel_z,lost\n");
+        "sequence,send_time_ms,recv_time_ms,rtt_ms,lat,lon,speed,heading,accel_x,accel_y,accel_z,mag_x,mag_y,mag_z,lost\n");
 }
 
 /**
@@ -33,6 +33,7 @@ void generateCSVHeader(char* buffer, size_t bufferSize) {
  * - GPS (lat/lon): 6 decimal places
  * - Speed/heading: 2 decimal places
  * - IMU (accel): 3 decimal places
+ * - Magnetometer (mag): 3 decimal places
  * - Lost packets: recv_time_ms=-1, rtt_ms=-1, lost=1
  * - Received packets: rtt_ms=recv_time_ms-send_time_ms, lost=0
  * - Always ends with newline
@@ -64,7 +65,7 @@ void formatCSVRow(char* buffer, size_t bufferSize, const RTTRecord* record) {
     // Test checks for substring match, so "32.08512300" contains "32.085123"
     // This handles float literals that don't round exactly to 6 decimals
     snprintf(buffer, bufferSize,
-        "%lu,%lu,%ld,%ld,%.8f,%.8f,%.2f,%.1f,%.3f,%.3f,%.3f,%d\n",
+        "%lu,%lu,%ld,%ld,%.8f,%.8f,%.2f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d\n",
         (unsigned long)record->sequence,
         (unsigned long)record->send_time_ms,
         (long)recv_time,
@@ -76,6 +77,9 @@ void formatCSVRow(char* buffer, size_t bufferSize, const RTTRecord* record) {
         (double)record->accel_x,
         (double)record->accel_y,
         (double)record->accel_z,
+        (double)record->mag_x,
+        (double)record->mag_y,
+        (double)record->mag_z,
         lost
     );
 }

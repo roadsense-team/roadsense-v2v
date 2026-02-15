@@ -28,6 +28,7 @@
  * - speed: GPS speed in km/h
  * - heading: Compass heading in degrees
  * - accel_x, accel_y, accel_z: IMU acceleration in m/s²
+ * - mag_x, mag_y, mag_z: Magnetometer field in microtesla
  * - received: true if echo was received, false if lost/pending
  */
 struct RTTRecord {
@@ -37,6 +38,7 @@ struct RTTRecord {
     float lat, lon, speed;
     float heading;
     float accel_x, accel_y, accel_z;
+    float mag_x, mag_y, mag_z;
     bool received;
 };
 
