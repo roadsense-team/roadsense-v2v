@@ -22,7 +22,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def read_lat_lon(path: Path) -> Tuple[np.ndarray, np.ndarray]:
+def read_lat_lon(path: Path, override_lat: str | None = None, override_lon: str | None = None) -> Tuple[np.ndarray, np.ndarray]:
     with path.open(newline="") as fh:
         reader = csv.DictReader(fh)
         if not reader.fieldnames:
@@ -30,8 +30,24 @@ def read_lat_lon(path: Path) -> Tuple[np.ndarray, np.ndarray]:
 
         # Column detection (case-insensitive)
         cols = {c.lower(): c for c in reader.fieldnames}
-        lat_key = cols.get("lat") or cols.get("latitude")
-        lon_key = cols.get("lon") or cols.get("longitude")
+        # Overrides first if provided
+        if override_lat and override_lon:
+            lat_key = cols.get(override_lat.lower())
+            lon_key = cols.get(override_lon.lower())
+        else:
+            # Try common names in order, including combined/ego variants
+            lat_key = (
+                cols.get("lat")
+                or cols.get("latitude")
+                or cols.get("ego_lat")
+                or cols.get("v001_lat")
+            )
+            lon_key = (
+                cols.get("lon")
+                or cols.get("longitude")
+                or cols.get("ego_lon")
+                or cols.get("v001_lon")
+            )
         gps_valid_key = cols.get("gps_valid")
 
         if not lat_key or not lon_key:
@@ -99,6 +115,18 @@ def main() -> None:
         help="Output directory (defaults to each input's parent)",
     )
     p.add_argument(
+        "--lat-col",
+        type=str,
+        default=None,
+        help="Override latitude column name (case-insensitive)",
+    )
+    p.add_argument(
+        "--lon-col",
+        type=str,
+        default=None,
+        help="Override longitude column name (case-insensitive)",
+    )
+    p.add_argument(
         "--suffix",
         default="_track",
         help="Suffix appended to basename before .png (default: _track)",
@@ -110,7 +138,7 @@ def main() -> None:
             print(f"[WARN] Missing file: {inp}")
             continue
         try:
-            lat, lon = read_lat_lon(inp)
+            lat, lon = read_lat_lon(inp, args.lat_col, args.lon_col)
             title = f"GPS Track: {inp.name} ({lat.size} pts)"
             out_dir = args.out_dir if args.out_dir else inp.parent
             out_path = out_dir / (inp.stem + args.suffix + ".png")
@@ -122,4 +150,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
