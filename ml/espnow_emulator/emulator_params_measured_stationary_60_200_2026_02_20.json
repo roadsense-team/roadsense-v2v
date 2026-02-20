@@ -1,0 +1,50 @@
+{
+  "burst_loss": {
+    "enabled": true,
+    "loss_multiplier": 1.8867924528301885,
+    "max_loss_cap": 0.95,
+    "mean_burst_length": 13.935897435897436
+  },
+  "domain_randomization": {
+    "gps_noise_range_m": [
+      0.7530115197008571,
+      3.0120460788034285
+    ],
+    "jitter_std_range_ms": [
+      0.5277566975254276,
+      2.1110267901017106
+    ],
+    "latency_range_ms": [
+      1.9709302325581395,
+      7.883720930232558
+    ],
+    "loss_rate_range": [
+      0.265,
+      0.6
+    ]
+  },
+  "latency": {
+    "base_ms": 3.941860465116279,
+    "distance_factor": 0.0,
+    "jitter_std_ms": 1.0555133950508553
+  },
+  "observation": {
+    "staleness_threshold_ms": 500
+  },
+  "packet_loss": {
+    "base_rate": 0.53,
+    "distance_threshold_1": 50,
+    "distance_threshold_2": 100,
+    "rate_tier_1": 0.97,
+    "rate_tier_2": 1.0,
+    "rate_tier_3": 1.0
+  },
+  "sensor_noise": {
+    "accel_std_ms2": 0.05918189276227265,
+    "gps_std_m": 1.5060230394017142,
+    "gyro_std_rad_s": 0.01,
+    "heading_std_deg": 0.5804034029617197,
+    "mag_std_ut": 0.6116613342996977,
+    "speed_std_ms": 0.021179360277075066
+  }
+}

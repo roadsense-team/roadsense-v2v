@@ -1,0 +1,89 @@
+{
+  "assumptions": {
+    "distance_factor_zero": true,
+    "one_way_latency_symmetric": true
+  },
+  "burst_loss": {
+    "burst_count": 78,
+    "max_burst_length": 780.0,
+    "mean_burst_length": 13.935897435897436
+  },
+  "duration_s": 139.9,
+  "gps_noise": {
+    "gps_std_m": 1.5060230394017142,
+    "lat_std_m": 1.689727851663882,
+    "lon_std_m": 1.2965456327213927,
+    "samples": 1400
+  },
+  "heading_noise_std_deg": 0.5804034029617197,
+  "high_loss_zones": [
+    {
+      "duration_s": 70.0,
+      "end_s": 100.0,
+      "lat_max": 32.86032867,
+      "lat_min": 32.86029816,
+      "lon_max": 35.36437225,
+      "lon_min": 35.36434937,
+      "loss_rate_avg": 1.0,
+      "loss_rate_max": 1.0,
+      "segment_count": 7,
+      "start_s": 30.0
+    }
+  ],
+  "imu_noise": {
+    "accel_mag_mean": 9.794842595802882,
+    "accel_mag_std": 0.021137671597385155,
+    "accel_x_std": 0.05563437151788207,
+    "accel_y_std": 0.09873408337474408,
+    "accel_z_std": 0.023177223394191773,
+    "samples": 1400
+  },
+  "input": "/tmp/rtt_stationary_60_200.csv",
+  "loss": {
+    "baseline_rate": 0.53,
+    "high_loss_threshold": 1.0,
+    "overall_count": 1400,
+    "overall_lost": 1087,
+    "overall_rate": 0.7764285714285715,
+    "p50": 0.97,
+    "p90": 1.0,
+    "p95": 1.0,
+    "segment_count": 14
+  },
+  "mag_noise": {
+    "heading_std_deg": 0.5804034029617197,
+    "mag_std_ut": 0.6116613342996977,
+    "mag_std_x": 0.810810257888649,
+    "mag_std_y": 0.6799705126624778,
+    "mag_std_z": 0.3442032323479662,
+    "samples": 1400
+  },
+  "one_way_latency_ms": {
+    "count": 313,
+    "max": 8.0,
+    "mean": 4.065495207667731,
+    "min": 2.5,
+    "p5": 2.5,
+    "p50": 4.0,
+    "p95": 6.5,
+    "std": 1.2081551790542795
+  },
+  "rtt_ms": {
+    "count": 313,
+    "max": 16.0,
+    "mean": 8.130990415335463,
+    "min": 5.0,
+    "p25": 6.0,
+    "p5": 5.0,
+    "p50": 8.0,
+    "p75": 10.0,
+    "p95": 13.0,
+    "p99": 14.0,
+    "std": 2.416310358108559
+  },
+  "sequence": {
+    "missing_sequences": 0,
+    "unique_sequences": 1400
+  },
+  "speed_noise_std_ms": 0.021179360277075066
+}

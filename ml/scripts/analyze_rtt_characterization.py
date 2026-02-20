@@ -48,7 +48,6 @@ REQUIRED_COLUMNS = [
 
 GPS_METERS_PER_DEG_LAT = 111000.0
 DEFAULT_STALENESS_MS = 500
-DEFAULT_MONITORED_VEHICLES = ["V002", "V003"]
 LOSS_MULTIPLIER_MIN = 1.5
 LOSS_MULTIPLIER_MAX = 5.0
 LOSS_CAP_MIN = 0.50
@@ -504,7 +503,6 @@ def build_emulator_params(
     gps_noise: Dict[str, float],
     speed_std: Optional[float],
     heading_std: Optional[float],
-    monitored_vehicles: List[str],
 ) -> Dict[str, Dict[str, float]]:
     if one_way_ms.size > 0:
         trimmed = one_way_ms
@@ -586,7 +584,6 @@ def build_emulator_params(
         },
         "observation": {
             "staleness_threshold_ms": DEFAULT_STALENESS_MS,
-            "monitored_vehicles": monitored_vehicles,
         },
         "domain_randomization": {
             "latency_range_ms": latency_range,
@@ -629,7 +626,6 @@ def main() -> int:
     parser.add_argument("--segment-seconds", type=int, default=10, help="Time bin size for loss analysis (seconds)")
     parser.add_argument("--stationary-speed-ms", type=float, default=0.5, help="Speed threshold for stationary noise")
     parser.add_argument("--heading-min-speed-ms", type=float, default=2.0, help="Speed threshold for heading noise")
-    parser.add_argument("--monitored-vehicles", type=str, default=",".join(DEFAULT_MONITORED_VEHICLES), help="Comma-separated vehicle IDs")
     parser.add_argument("--no-plots", action="store_true", help="Skip generating plots")
     args = parser.parse_args()
 
@@ -680,10 +676,6 @@ def main() -> int:
 
     high_loss_zones = find_high_loss_zones(records, loss_segments, loss_summary, args.segment_seconds)
 
-    monitored_vehicles = [v.strip() for v in args.monitored_vehicles.split(",") if v.strip()]
-    if not monitored_vehicles:
-        monitored_vehicles = DEFAULT_MONITORED_VEHICLES
-
     params = build_emulator_params(
         one_way_ms=one_way_ms,
         loss_summary=loss_summary,
@@ -694,7 +686,6 @@ def main() -> int:
         gps_noise=gps_noise,
         speed_std=speed_noise,
         heading_std=heading_noise,
-        monitored_vehicles=monitored_vehicles,
     )
 
     write_json(args.params_out, params)
