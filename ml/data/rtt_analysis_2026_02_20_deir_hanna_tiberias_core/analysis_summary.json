@@ -1,0 +1,221 @@
+{
+  "assumptions": {
+    "distance_factor_zero": true,
+    "one_way_latency_symmetric": true
+  },
+  "burst_loss": {
+    "burst_count": 2817,
+    "max_burst_length": 29.0,
+    "mean_burst_length": 2.1057862974795882
+  },
+  "duration_s": 1775.067,
+  "gps_noise": {
+    "gps_std_m": 33309.62453451055,
+    "lat_std_m": 44076.39781423598,
+    "lon_std_m": 16623.276722155224,
+    "samples": 2830
+  },
+  "heading_noise_std_deg": 24.748057783178453,
+  "high_loss_zones": [
+    {
+      "duration_s": 20.0,
+      "end_s": 80.0,
+      "lat_max": 32.86010361,
+      "lat_min": 32.86010361,
+      "lon_max": 35.36268616,
+      "lon_min": 35.36268616,
+      "loss_rate_avg": 0.605,
+      "loss_rate_max": 0.64,
+      "segment_count": 2,
+      "start_s": 60.0
+    },
+    {
+      "duration_s": 20.0,
+      "end_s": 360.0,
+      "lat_max": 31.71715927,
+      "lat_min": 31.71709061,
+      "lon_max": 35.99937439,
+      "lon_min": 35.99921417,
+      "loss_rate_avg": 0.64,
+      "loss_rate_max": 0.68,
+      "segment_count": 2,
+      "start_s": 340.0
+    },
+    {
+      "duration_s": 10.0,
+      "end_s": 450.0,
+      "lat_max": 32.85398102,
+      "lat_min": 32.85251999,
+      "lon_max": 35.4004364,
+      "lon_min": 35.39915466,
+      "loss_rate_avg": 0.67,
+      "loss_rate_max": 0.67,
+      "segment_count": 1,
+      "start_s": 440.0
+    },
+    {
+      "duration_s": 10.0,
+      "end_s": 520.0,
+      "lat_max": 32.84265137,
+      "lat_min": 32.84093094,
+      "lon_max": 35.39897537,
+      "lon_min": 35.39805984,
+      "loss_rate_avg": 0.72,
+      "loss_rate_max": 0.72,
+      "segment_count": 1,
+      "start_s": 510.0
+    },
+    {
+      "duration_s": 10.0,
+      "end_s": 580.0,
+      "lat_max": 32.83409882,
+      "lat_min": 32.83259964,
+      "lon_max": 35.39527893,
+      "lon_min": 35.39428329,
+      "loss_rate_avg": 0.6,
+      "loss_rate_max": 0.6,
+      "segment_count": 1,
+      "start_s": 570.0
+    },
+    {
+      "duration_s": 20.0,
+      "end_s": 610.0,
+      "lat_max": 32.83109665,
+      "lat_min": 32.82935333,
+      "lon_max": 35.39328384,
+      "lon_min": 35.39213181,
+      "loss_rate_avg": 0.6950000000000001,
+      "loss_rate_max": 0.76,
+      "segment_count": 2,
+      "start_s": 590.0
+    },
+    {
+      "duration_s": 40.0,
+      "end_s": 690.0,
+      "lat_max": 32.82927322,
+      "lat_min": 32.82421112,
+      "lon_max": 35.40834808,
+      "lon_min": 35.39097977,
+      "loss_rate_avg": 0.6325000000000001,
+      "loss_rate_max": 0.7,
+      "segment_count": 4,
+      "start_s": 650.0
+    },
+    {
+      "duration_s": 10.0,
+      "end_s": 790.0,
+      "lat_max": 32.82421112,
+      "lat_min": 32.82421112,
+      "lon_max": 35.40718842,
+      "lon_min": 35.40718842,
+      "loss_rate_avg": 0.65,
+      "loss_rate_max": 0.65,
+      "segment_count": 1,
+      "start_s": 780.0
+    },
+    {
+      "duration_s": 10.0,
+      "end_s": 1150.0,
+      "lat_max": 31.71615028,
+      "lat_min": 31.71575737,
+      "lon_max": 36.00100327,
+      "lon_min": 36.00061798,
+      "loss_rate_avg": 0.66,
+      "loss_rate_max": 0.66,
+      "segment_count": 1,
+      "start_s": 1140.0
+    },
+    {
+      "duration_s": 10.0,
+      "end_s": 1390.0,
+      "lat_max": 32.78758621,
+      "lat_min": 32.78678894,
+      "lon_max": 35.49068832,
+      "lon_min": 35.48830032,
+      "loss_rate_avg": 0.66,
+      "loss_rate_max": 0.66,
+      "segment_count": 1,
+      "start_s": 1380.0
+    },
+    {
+      "duration_s": 10.0,
+      "end_s": 1480.0,
+      "lat_max": 32.78839493,
+      "lat_min": 32.78744507,
+      "lon_max": 35.51062012,
+      "lon_min": 35.50843048,
+      "loss_rate_avg": 0.66,
+      "loss_rate_max": 0.66,
+      "segment_count": 1,
+      "start_s": 1470.0
+    },
+    {
+      "duration_s": 20.0,
+      "end_s": 1610.0,
+      "lat_max": 32.79804611,
+      "lat_min": 32.79632568,
+      "lon_max": 35.52432632,
+      "lon_min": 35.52185059,
+      "loss_rate_avg": 0.615,
+      "loss_rate_max": 0.65,
+      "segment_count": 2,
+      "start_s": 1590.0
+    }
+  ],
+  "imu_noise": {
+    "accel_mag_mean": 9.836654032639409,
+    "accel_mag_std": 0.5826115363610762,
+    "accel_x_std": 0.615655202172883,
+    "accel_y_std": 0.6496387772305514,
+    "accel_z_std": 0.5662055008786344,
+    "samples": 2830
+  },
+  "input": "/tmp/rtt_drive_core.csv",
+  "loss": {
+    "baseline_rate": 0.21,
+    "high_loss_threshold": 0.57,
+    "overall_count": 17746,
+    "overall_lost": 5932,
+    "overall_rate": 0.33427251211540626,
+    "p50": 0.31,
+    "p90": 0.57,
+    "p95": 0.6515000000000001,
+    "segment_count": 178
+  },
+  "mag_noise": {
+    "heading_std_deg": 24.748057783178453,
+    "mag_std_ut": 11.005988130828298,
+    "mag_std_x": 19.57175477729428,
+    "mag_std_y": 11.51224230406602,
+    "mag_std_z": 1.933967311124589,
+    "samples": 2830
+  },
+  "one_way_latency_ms": {
+    "count": 11814,
+    "max": 85.0,
+    "mean": 3.9976299305908243,
+    "min": 2.0,
+    "p5": 2.5,
+    "p50": 3.5,
+    "p95": 6.0,
+    "std": 1.447139459915423
+  },
+  "rtt_ms": {
+    "count": 11814,
+    "max": 170.0,
+    "mean": 7.9952598611816486,
+    "min": 4.0,
+    "p25": 6.0,
+    "p5": 5.0,
+    "p50": 7.0,
+    "p75": 9.0,
+    "p95": 12.0,
+    "p99": 15.0,
+    "std": 2.894278919830846
+  },
+  "sequence": {
+    "missing_sequences": 0,
+    "unique_sequences": 17746
+  },
+  "speed_noise_std_ms": 0.20541739353241745
+}

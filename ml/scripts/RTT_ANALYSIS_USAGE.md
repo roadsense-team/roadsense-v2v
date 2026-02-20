@@ -60,10 +60,6 @@ roadsense-v2v/ml/data/rtt_analysis/
 minimum speed to include in heading noise stats.
 **When to use:** Increase if you want heading noise from faster motion only.
 
-### `--monitored-vehicles V002,V003`
-**What it does:** Sets the list of vehicle IDs written into emulator params.
-**When to use:** If you want a different set of vehicles in the emulator config.
-
 ### `--no-plots`
 **What it does:** Skips PNG generation.
 **When to use:** If you are running headless or do not need graphs.

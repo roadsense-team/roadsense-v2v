@@ -1,0 +1,113 @@
+{
+  "assumptions": {
+    "distance_factor_zero": true,
+    "one_way_latency_symmetric": true
+  },
+  "burst_loss": {
+    "burst_count": 2943,
+    "max_burst_length": 780.0,
+    "mean_burst_length": 2.837920489296636
+  },
+  "duration_s": 2058.662,
+  "gps_noise": {
+    "gps_std_m": 47576.52863146111,
+    "lat_std_m": 61645.505639212126,
+    "lon_std_m": 26960.78240196939,
+    "samples": 5326
+  },
+  "heading_noise_std_deg": 17.99213625837568,
+  "high_loss_zones": [
+    {
+      "duration_s": 50.0,
+      "end_s": 50.0,
+      "lat_max": 32.86035919,
+      "lat_min": 32.8600769,
+      "lon_max": 35.36433411,
+      "lon_min": 35.36391068,
+      "loss_rate_avg": 0.99,
+      "loss_rate_max": 1.0,
+      "segment_count": 5,
+      "start_s": 0.0
+    },
+    {
+      "duration_s": 90.0,
+      "end_s": 160.0,
+      "lat_max": 32.86034012,
+      "lat_min": 32.86029816,
+      "lon_max": 35.36437225,
+      "lon_min": 35.36433411,
+      "loss_rate_avg": 0.9844444444444443,
+      "loss_rate_max": 1.0,
+      "segment_count": 9,
+      "start_s": 70.0
+    },
+    {
+      "duration_s": 70.0,
+      "end_s": 2060.0,
+      "lat_max": 32.79725647,
+      "lat_min": 32.79725266,
+      "lon_max": 35.52719879,
+      "lon_min": 35.52718735,
+      "loss_rate_avg": 0.99,
+      "loss_rate_max": 1.0,
+      "segment_count": 7,
+      "start_s": 1990.0
+    }
+  ],
+  "imu_noise": {
+    "accel_mag_mean": 9.81904028008572,
+    "accel_mag_std": 0.5489358906378573,
+    "accel_x_std": 0.46037477483266775,
+    "accel_y_std": 0.4966577955644296,
+    "accel_z_std": 0.5410389577025895,
+    "samples": 5722
+  },
+  "input": "/home/amirkhalifa/RoadSense2/rtt_log.csv",
+  "loss": {
+    "baseline_rate": 0.23,
+    "high_loss_threshold": 0.845,
+    "overall_count": 20638,
+    "overall_lost": 8352,
+    "overall_rate": 0.40469037697451304,
+    "p50": 0.35,
+    "p90": 0.845,
+    "p95": 1.0,
+    "segment_count": 206
+  },
+  "mag_noise": {
+    "heading_std_deg": 17.99213625837568,
+    "mag_std_ut": 14.85634173766934,
+    "mag_std_x": 15.86624463007635,
+    "mag_std_y": 21.580573339643088,
+    "mag_std_z": 7.122207243288575,
+    "samples": 5722
+  },
+  "one_way_latency_ms": {
+    "count": 12286,
+    "max": 85.0,
+    "mean": 4.008302132508546,
+    "min": 2.0,
+    "p5": 2.5,
+    "p50": 3.5,
+    "p95": 6.0,
+    "std": 1.4461899807838763
+  },
+  "rtt_ms": {
+    "count": 12286,
+    "max": 170.0,
+    "mean": 8.016604265017092,
+    "min": 4.0,
+    "p25": 6.0,
+    "p5": 5.0,
+    "p50": 7.0,
+    "p75": 9.0,
+    "p95": 12.0,
+    "p99": 15.0,
+    "std": 2.8923799615677526
+  },
+  "sequence": {
+    "missing_sequences": 0,
+    "unique_sequences": 20572
+  },
+  "speed_noise_std_ms": 0.16568743493147706
+}
