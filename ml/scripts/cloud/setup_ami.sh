@@ -15,7 +15,7 @@
 set -euo pipefail
 
 PAT="${1:?Usage: bash setup_ami.sh <GITHUB_PAT>}"
-REPO_URL="https://${PAT}@github.com/amirkhalifa285/SafeRide.git"
+REPO_URL="https://${PAT}@github.com/roadsense-team/roadsense-v2v.git"
 WORK_DIR="/home/ubuntu/work"
 
 echo "========================================="
@@ -33,7 +33,7 @@ sudo usermod -aG docker ubuntu
 echo "[2/5] Cloning repository..."
 if [ -d "$WORK_DIR" ]; then
     echo "  -> $WORK_DIR already exists, pulling latest..."
-    cd "$WORK_DIR" && git pull origin main
+    cd "$WORK_DIR" && git pull origin master
 else
     git clone "$REPO_URL" "$WORK_DIR"
 fi
@@ -46,7 +46,7 @@ sudo docker build -t roadsense-ml:latest .
 # 4. Clean PAT from git remote (SECURITY: don't bake credentials into AMI)
 echo "[4/5] Cleaning credentials from git remote..."
 cd "$WORK_DIR"
-git remote set-url origin https://github.com/amirkhalifa285/SafeRide.git
+git remote set-url origin https://github.com/roadsense-team/roadsense-v2v.git
 
 # 5. Verify
 echo "[5/5] Verifying installation..."

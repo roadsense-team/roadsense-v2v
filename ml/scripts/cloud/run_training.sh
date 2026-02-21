@@ -13,8 +13,6 @@
 # The generate command below uses the CANONICAL flags from CLAUDE.md.
 # Only change: --base_dir, --output_dir, --seed, --train_count, --eval_count.
 # =============================================================================
-
-#!/bin/bash
 set -euo pipefail
 exec > /var/log/training-run.log 2>&1
 
@@ -34,10 +32,10 @@ echo "Started: $(date -u)"
 # 1. Pull latest code
 echo "[1/5] Pulling latest code..."
 cd "$WORK_DIR"
-git remote set-url origin "https://${GITHUB_PAT}@github.com/amirkhalifa285/SafeRide.git"
-git pull origin main
+git remote set-url origin "https://${GITHUB_PAT}@github.com/roadsense-team/roadsense-v2v.git"
+git pull origin master
 # Clean PAT from memory-resident remote
-git remote set-url origin https://github.com/amirkhalifa285/SafeRide.git
+git remote set-url origin https://github.com/roadsense-team/roadsense-v2v.git
 
 # 2. Rebuild Docker image if Dockerfile changed (usually instant from cache)
 echo "[2/5] Rebuilding Docker image (cached - should be fast)..."
@@ -48,7 +46,7 @@ docker build -t roadsense-ml:latest .
 echo "[3/5] Generating dataset_v2..."
 cd "$WORK_DIR"
 ./ml/run_docker.sh generate \
-    --base_dir ml/scenarios/base_01 \
+    --base_dir ml/scenarios/base \
     --output_dir ml/scenarios/datasets/dataset_v2/base_01 \
     --seed 42 \
     --train_count 16 \
