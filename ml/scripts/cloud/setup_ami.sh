@@ -43,13 +43,18 @@ echo "[3/5] Building Docker image (this takes 5-8 minutes)..."
 cd "$WORK_DIR/ml"
 sudo docker build -t roadsense-ml:latest .
 
-# 4. Clean PAT from git remote (SECURITY: don't bake credentials into AMI)
-echo "[4/5] Cleaning credentials from git remote..."
+# 4. Pre-bake fixes for user-data runs (runs as root, repo owned by ubuntu)
+echo "[4/6] Applying runtime fixes..."
+sudo git config --global --add safe.directory "$WORK_DIR"
+chmod +x "$WORK_DIR/ml/run_docker.sh"
+
+# 5. Clean PAT from git remote (SECURITY: don't bake credentials into AMI)
+echo "[5/6] Cleaning credentials from git remote..."
 cd "$WORK_DIR"
 git remote set-url origin https://github.com/roadsense-team/roadsense-v2v.git
 
-# 5. Verify
-echo "[5/5] Verifying installation..."
+# 6. Verify
+echo "[6/6] Verifying installation..."
 echo ""
 echo "--- Docker image ---"
 sudo docker images | grep roadsense-ml
