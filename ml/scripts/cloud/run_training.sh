@@ -29,6 +29,10 @@ WORK_DIR="/home/ubuntu/work"
 echo "=== RoadSense Training Run: $RUN_ID ==="
 echo "Started: $(date -u)"
 
+# 0. Fix known AMI quirks (git ownership + script permissions)
+git config --global --add safe.directory "$WORK_DIR"
+chmod +x "$WORK_DIR/ml/run_docker.sh"
+
 # 1. Pull latest code
 echo "[1/5] Pulling latest code..."
 cd "$WORK_DIR"
@@ -36,6 +40,8 @@ git remote set-url origin "https://${GITHUB_PAT}@github.com/roadsense-team/roads
 git pull origin master
 # Clean PAT from memory-resident remote
 git remote set-url origin https://github.com/roadsense-team/roadsense-v2v.git
+# Re-fix permissions after pull (git may reset them)
+chmod +x "$WORK_DIR/ml/run_docker.sh"
 
 # 2. Rebuild Docker image if Dockerfile changed (usually instant from cache)
 echo "[2/5] Rebuilding Docker image (cached - should be fast)..."
