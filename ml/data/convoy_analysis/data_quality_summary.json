@@ -1,0 +1,225 @@
+{
+  "clock_link_estimates": {
+    "V001->V002": {
+      "drift_ppm": 6.009972640885763,
+      "fit_intercept_ms": -314515.6954715996,
+      "mean_ms": -314509.7125,
+      "median_ms": -314510.0,
+      "samples": 320,
+      "std_ms": 1.0497797947926313
+    },
+    "V001->V003": {
+      "drift_ppm": -11.585600292463027,
+      "fit_intercept_ms": -511299.9752297126,
+      "mean_ms": -511311.7767995857,
+      "median_ms": -511312.0,
+      "samples": 1931,
+      "std_ms": 1.1776855807773197
+    },
+    "V002->V001": {
+      "drift_ppm": -7.164070551124446,
+      "fit_intercept_ms": 314521.3992785743,
+      "mean_ms": 314516.47985347983,
+      "median_ms": 314516.0,
+      "samples": 273,
+      "std_ms": 0.5945190658249659
+    },
+    "V002->V003": {
+      "drift_ppm": -17.568406653123425,
+      "fit_intercept_ms": -196786.7218572336,
+      "mean_ms": -196799.08293460924,
+      "median_ms": -196799.0,
+      "samples": 1881,
+      "std_ms": 1.0976430748007049
+    },
+    "V003->V001": {
+      "drift_ppm": 12.349912749343162,
+      "fit_intercept_ms": 511312.4494245608,
+      "mean_ms": 511318.71186440677,
+      "median_ms": 511319.0,
+      "samples": 1947,
+      "std_ms": 0.8576348162288588
+    },
+    "V003->V002": {
+      "drift_ppm": 113.28840498392445,
+      "fit_intercept_ms": 196752.21060959614,
+      "mean_ms": 196809.00750750751,
+      "median_ms": 196806.0,
+      "samples": 1998,
+      "std_ms": 41.19424586677722
+    }
+  },
+  "files": [
+    {
+      "accel_std_ms2": 0.5314041139956966,
+      "duplicate_timestamps": 0,
+      "duration_s": 208.601,
+      "file": "/home/amirkhalifa/RoadSense2/Convoy_recording_02212026/V001/V001_tx_002.csv",
+      "gaps_gt_500ms": 0,
+      "gps_fix_pct": 100.0,
+      "gps_jump_max_m": 20.168661780644047,
+      "gps_jumps_gt_50m": 0,
+      "gyro_std_rad_s": 0.027226231927210538,
+      "mag_std_ut": 2.719330778275403,
+      "malformed_rows": 0,
+      "missing_rows": 0,
+      "rows_total": 2087,
+      "rows_valid": 2087,
+      "sensor_status": "WARN",
+      "speed_gps_corr": 0.14785306614753985,
+      "time_range_ms": [
+        913814,
+        1122415
+      ],
+      "type": "tx",
+      "vehicle": "V001"
+    },
+    {
+      "accel_std_ms2": 1.0900283440950285,
+      "duplicate_timestamps": 0,
+      "duration_s": 208.502,
+      "file": "/home/amirkhalifa/RoadSense2/Convoy_recording_02212026/V001/V001_rx_002.csv",
+      "gaps_gt_500ms": 0,
+      "gps_fix_pct": 100.0,
+      "gps_jump_max_m": 28.63012744142525,
+      "gps_jumps_gt_50m": 0,
+      "gyro_std_rad_s": 0.02465388470707368,
+      "mag_std_ut": 29.151542240503783,
+      "malformed_rows": 0,
+      "missing_rows": 0,
+      "rows_total": 2220,
+      "rows_valid": 2220,
+      "sensor_status": "WARN",
+      "speed_gps_corr": 0.019828499948029616,
+      "time_range_ms": [
+        913876,
+        1122378
+      ],
+      "type": "rx",
+      "vehicle": "V001"
+    },
+    {
+      "accel_std_ms2": 0.6132565953270108,
+      "duplicate_timestamps": 0,
+      "duration_s": 204.16,
+      "file": "/home/amirkhalifa/RoadSense2/Convoy_recording_02212026/V002/V002_tx_004.csv",
+      "gaps_gt_500ms": 2,
+      "gps_fix_pct": 100.0,
+      "gps_jump_max_m": 11.453077444406379,
+      "gps_jumps_gt_50m": 0,
+      "gyro_std_rad_s": 0.025989507158449904,
+      "mag_std_ut": 3.4038851835071617,
+      "malformed_rows": 0,
+      "missing_rows": 0,
+      "rows_total": 2024,
+      "rows_valid": 2024,
+      "sensor_status": "WARN",
+      "speed_gps_corr": 0.2169999485799497,
+      "time_range_ms": [
+        595830,
+        799990
+      ],
+      "type": "tx",
+      "vehicle": "V002"
+    },
+    {
+      "accel_std_ms2": 0.8002934628293564,
+      "duplicate_timestamps": 5,
+      "duration_s": 204.218,
+      "file": "/home/amirkhalifa/RoadSense2/Convoy_recording_02212026/V002/V002_rx_004.csv",
+      "gaps_gt_500ms": 1,
+      "gps_fix_pct": 100.0,
+      "gps_jump_max_m": 19.568935693896673,
+      "gps_jumps_gt_50m": 0,
+      "gyro_std_rad_s": 0.02583252947848888,
+      "mag_std_ut": 37.77093194791274,
+      "malformed_rows": 0,
+      "missing_rows": 0,
+      "rows_total": 2318,
+      "rows_valid": 2318,
+      "sensor_status": "WARN",
+      "speed_gps_corr": -0.09127277717953973,
+      "time_range_ms": [
+        595848,
+        800066
+      ],
+      "type": "rx",
+      "vehicle": "V002"
+    },
+    {
+      "accel_std_ms2": 0.5361083808185967,
+      "duplicate_timestamps": 0,
+      "duration_s": 207.699,
+      "file": "/home/amirkhalifa/RoadSense2/Convoy_recording_02212026/V003/V003_tx_002.csv",
+      "gaps_gt_500ms": 0,
+      "gps_fix_pct": 100.0,
+      "gps_jump_max_m": 10.409034772969438,
+      "gps_jumps_gt_50m": 0,
+      "gyro_std_rad_s": 0.02484300267459143,
+      "mag_std_ut": 2.9751739332287817,
+      "malformed_rows": 0,
+      "missing_rows": 0,
+      "rows_total": 2078,
+      "rows_valid": 2078,
+      "sensor_status": "WARN",
+      "speed_gps_corr": 0.21760449686322447,
+      "time_range_ms": [
+        401360,
+        609059
+      ],
+      "type": "tx",
+      "vehicle": "V003"
+    },
+    {
+      "accel_std_ms2": 1.1220160648913258,
+      "duplicate_timestamps": 0,
+      "duration_s": 207.702,
+      "file": "/home/amirkhalifa/RoadSense2/Convoy_recording_02212026/V003/V003_rx_002.csv",
+      "gaps_gt_500ms": 0,
+      "gps_fix_pct": 100.0,
+      "gps_jump_max_m": 47.51339248193457,
+      "gps_jumps_gt_50m": 0,
+      "gyro_std_rad_s": 0.02731414036880139,
+      "mag_std_ut": 41.744703332739746,
+      "malformed_rows": 0,
+      "missing_rows": 0,
+      "rows_total": 3812,
+      "rows_valid": 3812,
+      "sensor_status": "WARN",
+      "speed_gps_corr": 0.18747912658356566,
+      "time_range_ms": [
+        401399,
+        609101
+      ],
+      "type": "rx",
+      "vehicle": "V003"
+    }
+  ],
+  "input_root": "/home/amirkhalifa/RoadSense2/Convoy_recording_02212026",
+  "temporal_alignment": {
+    "offsets_to_v002_ms": {
+      "V001": -314510.0,
+      "V002": 0.0,
+      "V003": 196806.0
+    },
+    "overlap_duration_s": 200.688,
+    "overlap_window_v002_ms": [
+      599302.0,
+      799990.0
+    ],
+    "ranges_in_v002_clock": {
+      "V001": {
+        "end_v002_ms": 807904.0,
+        "start_v002_ms": 599302.0
+      },
+      "V002": {
+        "end_v002_ms": 799990.0,
+        "start_v002_ms": 595830.0
+      },
+      "V003": {
+        "end_v002_ms": 805864.0,
+        "start_v002_ms": 598164.0
+      }
+    }
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "detected": {
+    "all_candidates": [
+      {
+        "duration_s": 8.7,
+        "end_msg_ms": 922512,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -1.0852045454545456,
+        "min_accel_x_ms2": -1.3379999999999999,
+        "speed_drop_ms": -1.39,
+        "start_msg_ms": 913812
+      },
+      {
+        "duration_s": 24.9,
+        "end_msg_ms": 950612,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -0.9863120000000001,
+        "min_accel_x_ms2": -1.3940000000000001,
+        "speed_drop_ms": -6.08,
+        "start_msg_ms": 925712
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 952312,
+        "mean_accel_x_ms2": -0.8119999999999999,
+        "min_accel_x_ms2": -0.8420000000000001,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 952112
+      },
+      {
+        "duration_s": 2.2,
+        "end_msg_ms": 959612,
+        "mean_accel_x_ms2": -0.8175652173913044,
+        "min_accel_x_ms2": -0.8740000000000001,
+        "speed_drop_ms": -1.05,
+        "start_msg_ms": 957412
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 961012,
+        "mean_accel_x_ms2": -0.8366666666666666,
+        "min_accel_x_ms2": -0.8739999999999999,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 960812
+      },
+      {
+        "duration_s": 5.1,
+        "end_msg_ms": 968912,
+        "mean_accel_x_ms2": -0.9380000000000001,
+        "min_accel_x_ms2": -1.1380000000000001,
+        "speed_drop_ms": -1.2700000000000005,
+        "start_msg_ms": 963812
+      },
+      {
+        "duration_s": 0.4,
+        "end_msg_ms": 1014312,
+        "mean_accel_x_ms2": -0.85,
+        "min_accel_x_ms2": -0.916,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1013912
+      },
+      {
+        "duration_s": 0.3,
+        "end_msg_ms": 1017612,
+        "mean_accel_x_ms2": -0.8220000000000001,
+        "min_accel_x_ms2": -0.8540000000000001,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1017312
+      },
+      {
+        "duration_s": 14.1,
+        "end_msg_ms": 1037912,
+        "mean_accel_x_ms2": -0.9583380281690141,
+        "min_accel_x_ms2": -1.27,
+        "speed_drop_ms": 3.6399999999999997,
+        "start_msg_ms": 1023812
+      },
+      {
+        "duration_s": 1.3,
+        "end_msg_ms": 1039912,
+        "mean_accel_x_ms2": -0.9100000000000001,
+        "min_accel_x_ms2": -1.012,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1038612
+      },
+      {
+        "duration_s": 1.5,
+        "end_msg_ms": 1064912,
+        "mean_accel_x_ms2": -1.0015,
+        "min_accel_x_ms2": -1.4400000000000002,
+        "speed_drop_ms": 0.46999999999999975,
+        "start_msg_ms": 1063412
+      },
+      {
+        "duration_s": 2.3,
+        "end_msg_ms": 1075012,
+        "mean_accel_x_ms2": -0.9765833333333335,
+        "min_accel_x_ms2": -1.152,
+        "speed_drop_ms": -0.6000000000000001,
+        "start_msg_ms": 1072712
+      }
+    ],
+    "events": [
+      {
+        "duration_s": 8.7,
+        "end_msg_ms": 922512,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -1.0852045454545456,
+        "min_accel_x_ms2": -1.3379999999999999,
+        "speed_drop_ms": -1.39,
+        "start_msg_ms": 913812
+      },
+      {
+        "duration_s": 24.9,
+        "end_msg_ms": 950612,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -0.9863120000000001,
+        "min_accel_x_ms2": -1.3940000000000001,
+        "speed_drop_ms": -6.08,
+        "start_msg_ms": 925712
+      },
+      {
+        "duration_s": 1.5,
+        "end_msg_ms": 1064912,
+        "event_type": "hard_braking",
+        "mean_accel_x_ms2": -1.0015,
+        "min_accel_x_ms2": -1.4400000000000002,
+        "speed_drop_ms": 0.46999999999999975,
+        "start_msg_ms": 1063412
+      }
+    ],
+    "hard_event": {
+      "duration_s": 1.5,
+      "end_msg_ms": 1064912,
+      "event_type": "hard_braking",
+      "mean_accel_x_ms2": -1.0015,
+      "min_accel_x_ms2": -1.4400000000000002,
+      "speed_drop_ms": 0.46999999999999975,
+      "start_msg_ms": 1063412
+    },
+    "stationary_tail": {
+      "duration_s": 41.802,
+      "end_msg_ms": 1122414,
+      "start_msg_ms": 1080612
+    }
+  },
+  "expected_protocol": {
+    "ego_vehicle": "V002",
+    "final_stationary_window_expected_s": 60,
+    "hard_braking_events": 1,
+    "light_braking_events": 2
+  },
+  "mapped_to_v002_clock": {
+    "hard_event_v002_ms": [
+      748902.0,
+      750402.0
+    ]
+  }
+}

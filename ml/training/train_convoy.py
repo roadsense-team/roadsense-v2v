@@ -8,7 +8,9 @@ import argparse
 import json
 import os
 from datetime import datetime
-from typing import Dict, Optional, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+import xml.etree.ElementTree as ET
 
 import gymnasium as gym
 import numpy as np
@@ -47,6 +49,15 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=10,
         help="Number of evaluation episodes after training (default: 10).",
+    )
+    parser.add_argument(
+        "--episodes_per_scenario",
+        type=int,
+        default=None,
+        help=(
+            "If set, overrides --eval_episodes with "
+            "(episodes_per_scenario * number_of_eval_scenarios)."
+        ),
     )
 
     # Emulator configuration
@@ -115,6 +126,14 @@ def parse_args() -> argparse.Namespace:
         help="Skip evaluation after training.",
     )
     parser.add_argument(
+        "--no_eval_hazard_injection",
+        action="store_true",
+        help=(
+            "Disable hazard injection during post-training evaluation. "
+            "By default hazard injection is ENABLED for evaluation."
+        ),
+    )
+    parser.add_argument(
         "--gui",
         action="store_true",
         help="Run SUMO with GUI (for debugging).",
@@ -130,7 +149,131 @@ def parse_args() -> argparse.Namespace:
     if args.dataset_dir is not None and args.sumo_cfg is not None:
         parser.error("Cannot specify both --dataset_dir and --sumo_cfg")
 
+    if args.eval_episodes <= 0:
+        parser.error("--eval_episodes must be > 0")
+
+    if args.episodes_per_scenario is not None and args.episodes_per_scenario <= 0:
+        parser.error("--episodes_per_scenario must be > 0")
+
     return args
+
+
+def _load_eval_scenario_ids(dataset_dir: str) -> List[str]:
+    """Load eval scenario IDs from dataset manifest."""
+    manifest_path = Path(dataset_dir) / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"manifest.json not found in dataset_dir: {dataset_dir}")
+
+    with manifest_path.open("r", encoding="utf-8") as file_handle:
+        manifest = json.load(file_handle)
+
+    eval_scenarios = manifest.get("eval_scenarios")
+    if not isinstance(eval_scenarios, list):
+        raise KeyError("manifest.json missing required list field: eval_scenarios")
+
+    return [str(scenario_id) for scenario_id in eval_scenarios]
+
+
+def _resolve_routes_path(dataset_dir: str, scenario_id: str) -> Optional[Path]:
+    """Resolve vehicles.rou.xml path for a scenario ID."""
+    if not scenario_id or scenario_id == "unknown":
+        return None
+
+    dataset_root = Path(dataset_dir)
+    candidates: List[Path] = []
+
+    if scenario_id.startswith("eval_"):
+        candidates.append(dataset_root / "eval" / scenario_id / "vehicles.rou.xml")
+    elif scenario_id.startswith("train_"):
+        candidates.append(dataset_root / "train" / scenario_id / "vehicles.rou.xml")
+
+    candidates.extend(
+        [
+            dataset_root / "eval" / scenario_id / "vehicles.rou.xml",
+            dataset_root / "train" / scenario_id / "vehicles.rou.xml",
+        ]
+    )
+
+    for route_path in candidates:
+        if route_path.exists():
+            return route_path
+
+    return None
+
+
+def _infer_peer_count(
+    dataset_dir: Optional[str],
+    scenario_id: str,
+    cache: Dict[str, Optional[int]],
+) -> Optional[int]:
+    """
+    Infer peer count from vehicles.rou.xml by counting non-V001 vehicles.
+    """
+    if scenario_id in cache:
+        return cache[scenario_id]
+
+    if dataset_dir is None:
+        cache[scenario_id] = None
+        return None
+
+    routes_path = _resolve_routes_path(dataset_dir, scenario_id)
+    if routes_path is None:
+        cache[scenario_id] = None
+        return None
+
+    try:
+        routes_tree = ET.parse(routes_path)
+    except (ET.ParseError, OSError):
+        cache[scenario_id] = None
+        return None
+
+    root = routes_tree.getroot()
+    peer_count = 0
+    for elem in root.iter():
+        tag = elem.tag.split("}", 1)[-1] if isinstance(elem.tag, str) else elem.tag
+        if tag == "vehicle" and elem.get("id") != "V001":
+            peer_count += 1
+
+    cache[scenario_id] = peer_count
+    return peer_count
+
+
+def _summarize_episode_group(episodes: List[dict]) -> dict:
+    """Build aggregate metrics for a list of episode details."""
+    episode_count = len(episodes)
+    if episode_count == 0:
+        return {
+            "episodes": 0,
+            "collisions": 0,
+            "collision_rate": 0.0,
+            "truncations": 0,
+            "truncation_rate": 0.0,
+            "success_rate": 0.0,
+            "avg_reward": 0.0,
+            "std_reward": 0.0,
+            "min_reward": 0.0,
+            "max_reward": 0.0,
+            "avg_length": 0.0,
+        }
+
+    rewards = [float(episode["reward"]) for episode in episodes]
+    lengths = [int(episode["length"]) for episode in episodes]
+    collisions = sum(1 for episode in episodes if episode["collision"])
+    truncations = sum(1 for episode in episodes if episode["truncated"])
+
+    return {
+        "episodes": episode_count,
+        "collisions": collisions,
+        "collision_rate": collisions / episode_count,
+        "truncations": truncations,
+        "truncation_rate": truncations / episode_count,
+        "success_rate": (episode_count - collisions) / episode_count,
+        "avg_reward": float(np.mean(rewards)),
+        "std_reward": float(np.std(rewards)),
+        "min_reward": float(np.min(rewards)),
+        "max_reward": float(np.max(rewards)),
+        "avg_length": float(np.mean(lengths)),
+    }
 
 
 def train(args: argparse.Namespace) -> Tuple[str, Dict[str, int]]:
@@ -221,14 +364,24 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
     Returns:
         Dictionary of evaluation metrics
     """
-    print(f"\nStarting evaluation: {args.eval_episodes} episodes")
+    eval_episodes = args.eval_episodes
+    if args.episodes_per_scenario is not None:
+        if args.dataset_dir is None:
+            eval_episodes = args.episodes_per_scenario
+        else:
+            eval_scenario_ids = _load_eval_scenario_ids(args.dataset_dir)
+            if not eval_scenario_ids:
+                raise ValueError("Dataset eval_scenarios is empty; cannot evaluate.")
+            eval_episodes = args.episodes_per_scenario * len(eval_scenario_ids)
+
+    print(f"\nStarting evaluation: {eval_episodes} episodes")
 
     model = PPO.load(model_path)
 
     env_kwargs = {
         "render_mode": "human" if args.gui else None,
         "gui": args.gui,
-        "hazard_injection": False,
+        "hazard_injection": not args.no_eval_hazard_injection,
         "emulator_params_path": args.emulator_params,
         "scenario_seed": args.seed,
     }
@@ -242,14 +395,12 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
 
     env = gym.make("RoadSense-Convoy-v0", **env_kwargs)
 
-    episode_rewards = []
-    episode_lengths = []
-    collisions = 0
-    truncations = 0
+    episode_details = []
     scenario_ids = []
+    peer_count_cache: Dict[str, Optional[int]] = {}
 
     try:
-        for ep in range(args.eval_episodes):
+        for ep in range(eval_episodes):
             obs, info = env.reset()
             scenario_id = info.get("scenario_id", "unknown")
             scenario_ids.append(scenario_id)
@@ -265,44 +416,90 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
                 episode_reward += reward
                 episode_length += 1
 
-            episode_rewards.append(episode_reward)
-            episode_lengths.append(episode_length)
-
-            if terminated:
-                collisions += 1
-            if truncated:
-                truncations += 1
+            peer_count = _infer_peer_count(args.dataset_dir, scenario_id, peer_count_cache)
+            collision = bool(terminated)
+            truncation = bool(truncated)
+            outcome = "collision" if collision else "truncated" if truncation else "other"
+            episode_details.append(
+                {
+                    "episode": ep + 1,
+                    "scenario_id": scenario_id,
+                    "peer_count": peer_count,
+                    "reward": float(episode_reward),
+                    "length": episode_length,
+                    "collision": collision,
+                    "truncated": truncation,
+                    "success": not collision,
+                    "outcome": outcome,
+                }
+            )
 
             print(
-                f"  Episode {ep + 1}/{args.eval_episodes}: "
+                f"  Episode {ep + 1}/{eval_episodes}: "
                 f"reward={episode_reward:.2f}, "
                 f"length={episode_length}, "
-                f"scenario={scenario_id}"
+                f"scenario={scenario_id}, "
+                f"peers={peer_count if peer_count is not None else 'unknown'}, "
+                f"outcome={outcome}"
             )
     finally:
         env.close()
 
+    overall_summary = _summarize_episode_group(episode_details)
+
+    scenario_groups: Dict[str, List[dict]] = {}
+    for episode in episode_details:
+        scenario_groups.setdefault(episode["scenario_id"], []).append(episode)
+    scenario_summary = {
+        scenario_id: _summarize_episode_group(group_episodes)
+        for scenario_id, group_episodes in sorted(scenario_groups.items())
+    }
+
+    peer_count_groups: Dict[str, List[dict]] = {}
+    for episode in episode_details:
+        peer_key = "unknown" if episode["peer_count"] is None else str(episode["peer_count"])
+        peer_count_groups.setdefault(peer_key, []).append(episode)
+
+    def _peer_sort_key(item: Tuple[str, List[dict]]) -> Tuple[int, int]:
+        key = item[0]
+        if key == "unknown":
+            return (1, 0)
+        return (0, int(key))
+
+    peer_count_summary = {
+        peer_key: _summarize_episode_group(group_episodes)
+        for peer_key, group_episodes in sorted(peer_count_groups.items(), key=_peer_sort_key)
+    }
+
     metrics = {
-        "eval_episodes": args.eval_episodes,
-        "avg_reward": float(np.mean(episode_rewards)),
-        "std_reward": float(np.std(episode_rewards)),
-        "min_reward": float(np.min(episode_rewards)),
-        "max_reward": float(np.max(episode_rewards)),
-        "avg_length": float(np.mean(episode_lengths)),
-        "collisions": collisions,
-        "collision_rate": collisions / args.eval_episodes,
-        "truncations": truncations,
-        "truncation_rate": truncations / args.eval_episodes,
+        "eval_episodes": eval_episodes,
+        "episodes_per_scenario": args.episodes_per_scenario,
+        "hazard_injection": not args.no_eval_hazard_injection,
+        "avg_reward": overall_summary["avg_reward"],
+        "std_reward": overall_summary["std_reward"],
+        "min_reward": overall_summary["min_reward"],
+        "max_reward": overall_summary["max_reward"],
+        "avg_length": overall_summary["avg_length"],
+        "collisions": overall_summary["collisions"],
+        "collision_rate": overall_summary["collision_rate"],
+        "truncations": overall_summary["truncations"],
+        "truncation_rate": overall_summary["truncation_rate"],
+        "success_rate": overall_summary["success_rate"],
         "scenarios_evaluated": scenario_ids,
+        "scenario_summary": scenario_summary,
+        "peer_count_summary": peer_count_summary,
+        "episode_details": episode_details,
     }
 
     print("\nEvaluation Summary:")
     print(f"  Avg Reward: {metrics['avg_reward']:.2f} (+/- {metrics['std_reward']:.2f})")
     print(f"  Avg Length: {metrics['avg_length']:.1f}")
     print(
-        f"  Collisions: {metrics['collisions']}/{args.eval_episodes} "
+        f"  Collisions: {metrics['collisions']}/{eval_episodes} "
         f"({metrics['collision_rate'] * 100:.1f}%)"
     )
+    print(f"  Success Rate: {metrics['success_rate'] * 100:.1f}%")
+    print(f"  Hazard Injection: {metrics['hazard_injection']}")
 
     return metrics
 
@@ -334,6 +531,9 @@ def save_metrics(
             "emulator_params": args.emulator_params,
             "seed": args.seed,
             "total_timesteps": args.total_timesteps,
+            "eval_episodes": args.eval_episodes,
+            "episodes_per_scenario": args.episodes_per_scenario,
+            "eval_hazard_injection": not args.no_eval_hazard_injection,
             "learning_rate": args.learning_rate,
             "n_steps": args.n_steps,
             "ent_coef": args.ent_coef,
