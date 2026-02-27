@@ -90,7 +90,7 @@ public:
 
     /**
      * @brief Register callback for received data
-     * @param callback Function to call when data received
+     * @param callback Function to call when data received (sender MAC + payload)
      */
     void onReceive(ReceiveCallback callback) override;
 

@@ -108,7 +108,27 @@ class ConvoyEnv(gym.Env):
                 dtype=np.float32,
             ),
         })
-        self.action_space = spaces.Discrete(4)
+        self.action_space = spaces.Box(
+            low=np.array([0.0], dtype=np.float32),
+            high=np.array([1.0], dtype=np.float32),
+            dtype=np.float32,
+        )
+
+    def _parse_action_value(self, action: Any) -> float:
+        if isinstance(action, np.ndarray):
+            if action.size != 1:
+                raise ValueError(f"Expected scalar action, got shape {action.shape}")
+            return float(action.item())
+
+        if hasattr(action, "item"):
+            return float(action.item())
+
+        if isinstance(action, (list, tuple)):
+            if len(action) != 1:
+                raise ValueError(f"Expected scalar action, got {len(action)} values")
+            return float(action[0])
+
+        return float(action)
 
     def reset(
         self,
@@ -170,20 +190,11 @@ class ConvoyEnv(gym.Env):
         return observation, info
 
     def step(
-        self, action: int
+        self, action: Any
     ) -> Tuple[Dict[str, np.ndarray], float, bool, bool, Dict[str, Any]]:
-        if isinstance(action, np.ndarray):
-            if action.size != 1:
-                raise ValueError(f"Expected scalar action, got shape {action.shape}")
-            action = int(action.item())
-        elif hasattr(action, "item"):
-            action = int(action.item())
-        elif isinstance(action, (list, tuple)):
-            if len(action) != 1:
-                raise ValueError(f"Expected scalar action, got {len(action)} values")
-            action = int(action[0])
+        action_value = self._parse_action_value(action)
 
-        actual_decel = self.action_applicator.apply(self.sumo, action)
+        actual_decel = self.action_applicator.apply(self.sumo, action_value)
 
         hazard_injected = False
         if self.hazard_injector is not None:
@@ -215,7 +226,7 @@ class ConvoyEnv(gym.Env):
 
         reward, reward_info = self.reward_calculator.calculate(
             distance=distance,
-            action=action,
+            action_value=action_value,
             deceleration=actual_decel,
         )
 
@@ -229,48 +240,29 @@ class ConvoyEnv(gym.Env):
 
         return observation, reward, terminated, truncated, info
 
-    def _transmit_vehicle_states(
-        self,
-        ego_state: VehicleState,
-        peer_states: Iterable[VehicleState],
-        current_time_ms: int,
-    ) -> List["ReceivedMessage"]:
-        received_messages = []
-        for state in peer_states:
-            msg = state.to_v2v_message(timestamp_ms=current_time_ms)
-            received = self.emulator.transmit(
-                sender_msg=msg,
-                sender_pos=(state.x, state.y),
-                receiver_pos=(ego_state.x, ego_state.y),
-                current_time_ms=current_time_ms,
-            )
-            if received is not None:
-                received_messages.append(received)
-
-        return received_messages
-
     def _step_espnow(
         self,
         ego_state: VehicleState,
         current_time_ms: int,
     ) -> Tuple[Dict[str, np.ndarray], List[VehicleState]]:
         ego_pos = (ego_state.x, ego_state.y)
-        peer_states = []
+        vehicle_states = {
+            vehicle_id: self.sumo.get_vehicle_state(vehicle_id)
+            for vehicle_id in traci.vehicle.getIDList()
+        }
+        peer_states = [
+            state for vehicle_id, state in vehicle_states.items()
+            if vehicle_id != self.EGO_VEHICLE_ID
+        ]
 
-        for vehicle_id in traci.vehicle.getIDList():
-            if vehicle_id == self.EGO_VEHICLE_ID:
-                continue
-            peer_states.append(self.sumo.get_vehicle_state(vehicle_id))
-
-        self._transmit_vehicle_states(
-            ego_state=ego_state,
-            peer_states=peer_states,
+        received_map = self.emulator.simulate_mesh_step(
+            vehicle_states=vehicle_states,
+            ego_id=self.EGO_VEHICLE_ID,
             current_time_ms=current_time_ms,
         )
 
         meters_per_deg = ESPNOWEmulator.METERS_PER_DEG_LAT
         peer_observations = []
-        received_map = self.emulator.sync_and_get_messages(current_time_ms)
         staleness_threshold = self.obs_builder.STALENESS_THRESHOLD
         params = getattr(self.emulator, "params", None)
         if isinstance(params, dict):
@@ -281,7 +273,7 @@ class ConvoyEnv(gym.Env):
 
         for received in received_map.values():
             msg = received.message
-            age_ms = current_time_ms - received.received_at_ms + received.age_ms
+            age_ms = float(received.age_ms)
             valid = age_ms < staleness_threshold
             peer_observations.append({
                 "x": msg.lon * meters_per_deg,

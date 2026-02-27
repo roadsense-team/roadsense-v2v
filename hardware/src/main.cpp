@@ -20,7 +20,15 @@
 #include "sensors/gps/NEO6M_Driver.h"
 #include "network/transport/EspNowTransport.h"
 #include "network/protocol/V2VMessage.h"
+#include "network/mesh/PackageManager.h"
+#include "network/mesh/MeshRelayPolicy.h"
+#include "inference/ConeFilter.h"
 #include "logging/DataLogger.h"
+#include "utils/MACHelper.h"
+
+#include <cmath>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // ============================================================================
 // GLOBAL OBJECTS
@@ -30,7 +38,9 @@ QMC5883LDriver mag;
 NEO6M_Driver gps;
 EspNowTransport transport;
 DataLogger dataLogger;
+PackageManager packageManager;
 bool magInitialized = false;
+SemaphoreHandle_t packageManagerMutex = nullptr;
 
 // Timer variables
 uint32_t lastBroadcastTime = 0;
@@ -45,6 +55,19 @@ const uint32_t BUTTON_DEBOUNCE_MS = 500;
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+bool lockPackageManager(TickType_t waitTicks) {
+    if (packageManagerMutex == nullptr) {
+        return true;
+    }
+    return xSemaphoreTake(packageManagerMutex, waitTicks) == pdTRUE;
+}
+
+void unlockPackageManager() {
+    if (packageManagerMutex != nullptr) {
+        xSemaphoreGive(packageManagerMutex);
+    }
+}
 
 /**
  * @brief Update LED based on system state
@@ -160,30 +183,82 @@ V2VMessage buildV2VMessage() {
     return msg;
 }
 
-/**
- * @brief Callback for received messages
- */
-void onDataReceived(const uint8_t* data, size_t len) {
-    if (len != sizeof(V2VMessage)) {
-        Logger::getInstance().warning("V2V", "Received invalid size: " + String(len));
+void relayPendingFrontConePackages(const V2VMessage& ownMsg) {
+    if (!std::isfinite(ownMsg.dynamics.heading) ||
+        !std::isfinite(ownMsg.position.lat) ||
+        !std::isfinite(ownMsg.position.lon)) {
         return;
     }
 
-    const V2VMessage* msg = (const V2VMessage*)data;
+    packageManager.setProcessPackageCallback([&ownMsg](const String&, const PackageData& pkg) {
+        const V2VMessage& candidate = pkg.message;
+
+        const bool sourceIsSelf = MACHelper::compareMACAddresses(candidate.sourceMAC, ownMsg.sourceMAC);
+        const bool inFrontCone = ConeFilter::isInCone(
+            ownMsg.dynamics.heading,
+            ownMsg.position.lat,
+            ownMsg.position.lon,
+            candidate.position.lat,
+            candidate.position.lon
+        );
+
+        if (!MeshRelayPolicy::shouldRelayMessage(candidate.hopCount, sourceIsSelf, inFrontCone, MAX_HOP_COUNT)) {
+            return;
+        }
+
+        V2VMessage relayMsg = candidate;
+        relayMsg.hopCount = MeshRelayPolicy::computeRelayedHopCount(candidate.hopCount, MAX_HOP_COUNT);
+
+        const bool sent = transport.send(reinterpret_cast<const uint8_t*>(&relayMsg), sizeof(relayMsg));
+        if (sent && dataLogger.isLogging()) {
+            dataLogger.logTxMessage(relayMsg);
+        }
+    });
+
+    packageManager.processAllPendingPackages();
+}
+
+/**
+ * @brief Callback for received messages
+ */
+void onDataReceived(const uint8_t* macAddr, const uint8_t* data, size_t len) {
+    if (!lockPackageManager(pdMS_TO_TICKS(2))) {
+        Logger::getInstance().warning("V2V", "PackageManager busy, dropping RX");
+        return;
+    }
+
+    V2VMessage msg;
+    const bool parsed = MeshRelayPolicy::parseAndStoreReceivedMessage<V2VMessage>(
+        macAddr,
+        data,
+        len,
+        [](const uint8_t* senderMac, const V2VMessage& parsedMsg, uint8_t hopCount) {
+            packageManager.addPackage(senderMac, parsedMsg, hopCount);
+        },
+        &msg
+    );
+
+    unlockPackageManager();
+
+    if (!parsed) {
+        Logger::getInstance().warning("V2V", "Received invalid size: " + String(len));
+        return;
+    }
 
     // Queue received message (Mode 1: Network Characterization)
     // NOTE: queueRxMessage() is ISR-safe - no SD card I/O here!
     // Messages are written to SD in main loop via processRxQueue()
     if (dataLogger.isLogging()) {
-        dataLogger.queueRxMessage(*msg);
+        dataLogger.queueRxMessage(msg);
     }
 
     // Debug output (1 per second max to avoid spam)
     static uint32_t lastRxPrint = 0;
     if (millis() - lastRxPrint >= 1000) {
-        String logMsg = "Rx from " + String(msg->vehicleId) +
-                        " | Speed: " + String(msg->dynamics.speed, 1) +
-                        " | Age: " + String(msg->age()) + "ms";
+        String logMsg = "Rx from " + String(msg.vehicleId) +
+                        " | Speed: " + String(msg.dynamics.speed, 1) +
+                        " | Age: " + String(msg.age()) + "ms" +
+                        " | Hop: " + String(msg.hopCount);
         Logger::getInstance().info("V2V", logMsg);
         lastRxPrint = millis();
     }
@@ -210,6 +285,12 @@ void setup() {
     pinMode(LED_STATUS_PIN, OUTPUT);
     digitalWrite(LED_STATUS_PIN, LOW);
     log.info("MAIN", "GPIO initialized: Button=" + String(BUTTON_CALIB_PIN) + ", LED=" + String(LED_STATUS_PIN));
+
+    // 1.6 Initialize mesh synchronization primitives
+    packageManagerMutex = xSemaphoreCreateMutex();
+    if (packageManagerMutex == nullptr) {
+        log.warning("MAIN", "⚠️ PackageManager mutex allocation failed - using unlocked access");
+    }
 
     // 2. Initialize Sensors
     log.info("MAIN", "Initializing Sensors...");
@@ -294,6 +375,11 @@ void loop() {
             dataLogger.logTxMessage(msg);
         }
 
+        if (lockPackageManager(pdMS_TO_TICKS(5))) {
+            relayPendingFrontConePackages(msg);
+            unlockPackageManager();
+        }
+
         lastBroadcastTime = now;
     }
 
@@ -304,6 +390,11 @@ void loop() {
 
     // 6. Debug Print (1 Hz)
     if (now - lastPrintTime >= 1000) {
+        if (lockPackageManager(pdMS_TO_TICKS(2))) {
+            packageManager.cleanupOldPackages();
+            unlockPackageManager();
+        }
+
         IGpsSensor::GpsData gpsInfo = gps.read();
 
         String statusMsg = "";

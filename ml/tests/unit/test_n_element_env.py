@@ -38,22 +38,21 @@ def _make_mock_sumo(state_map: dict) -> Mock:
 def _make_mock_emulator() -> Mock:
     mock = Mock()
     mock.clear = Mock()
-    last_received = {}
 
-    def _transmit(sender_msg, sender_pos, receiver_pos, current_time_ms):
-        received = ReceivedMessage(
-            message=sender_msg,
-            age_ms=10,
-            received_at_ms=current_time_ms + 10,
-        )
-        last_received[sender_msg.vehicle_id] = received
+    def _simulate_mesh_step(vehicle_states, ego_id, current_time_ms):
+        received = {}
+        for vehicle_id, state in vehicle_states.items():
+            if vehicle_id == ego_id:
+                continue
+            msg = state.to_v2v_message(timestamp_ms=current_time_ms)
+            received[vehicle_id] = ReceivedMessage(
+                message=msg,
+                age_ms=10,
+                received_at_ms=current_time_ms + 10,
+            )
         return received
 
-    def _sync_and_get_messages(_current_time_ms):
-        return last_received.copy()
-
-    mock.transmit = Mock(side_effect=_transmit)
-    mock.sync_and_get_messages = Mock(side_effect=_sync_and_get_messages)
+    mock.simulate_mesh_step = Mock(side_effect=_simulate_mesh_step)
     return mock
 
 
@@ -135,9 +134,9 @@ def test_peer_mask_three_peers(tmp_path):
 
     states = {
         "V001": _make_state("V001", 0.0, 0.0),
-        "V002": _make_state("V002", 10.0, 0.0),
-        "V003": _make_state("V003", 20.0, 0.0),
-        "V004": _make_state("V004", 30.0, 0.0),
+        "V002": _make_state("V002", 0.0, 10.0), # North
+        "V003": _make_state("V003", 0.0, 20.0), # North
+        "V004": _make_state("V004", 0.0, 30.0), # North
     }
     mock_sumo = _make_mock_sumo(states)
     mock_emulator = _make_mock_emulator()

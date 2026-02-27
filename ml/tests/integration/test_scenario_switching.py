@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from envs.convoy_env import ConvoyEnv
+from ml.envs.convoy_env import ConvoyEnv
 
 
 @pytest.mark.integration

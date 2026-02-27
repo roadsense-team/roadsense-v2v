@@ -1,5 +1,5 @@
 """
-Unit tests for ObservationBuilder (Phase 3).
+Unit tests for ObservationBuilder (Phase 3) - Corrected for SUMO Frame.
 """
 import numpy as np
 import pytest
@@ -8,14 +8,14 @@ from envs.observation_builder import ObservationBuilder
 from envs.sumo_connection import VehicleState
 
 
-def _make_ego_state(speed: float = 15.0, x: float = 0.0, y: float = 0.0) -> VehicleState:
+def _make_ego_state(speed: float = 15.0, x: float = 0.0, y: float = 0.0, heading: float = 0.0) -> VehicleState:
     return VehicleState(
         vehicle_id="V001",
         x=x,
         y=y,
         speed=speed,
         acceleration=0.0,
-        heading=0.0,
+        heading=heading,
         lane_position=0.0,
     )
 
@@ -43,8 +43,9 @@ def _make_peer_obs(
 def test_build_observation_returns_dict_shapes():
     """Returns dict with expected shapes."""
     builder = ObservationBuilder()
-    ego_state = _make_ego_state()
-    peers = [_make_peer_obs(10.0, 0.0), _make_peer_obs(20.0, 5.0)]
+    ego_state = _make_ego_state() # Heading 0 (North)
+    # Peers North of ego
+    peers = [_make_peer_obs(0.0, 10.0), _make_peer_obs(2.0, 20.0)]
 
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
@@ -58,7 +59,7 @@ def test_build_observation_dtype_is_float32():
     """All observation values use float32 dtype."""
     builder = ObservationBuilder()
     ego_state = _make_ego_state()
-    peers = [_make_peer_obs(10.0, 0.0)]
+    peers = [_make_peer_obs(0.0, 10.0)]
 
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
@@ -81,10 +82,11 @@ def test_build_observation_peer_mask_counts_valid_peers():
     """Peer mask has one entry per valid peer."""
     builder = ObservationBuilder()
     ego_state = _make_ego_state()
+    # Peers North of ego (Forward)
     peers = [
-        _make_peer_obs(10.0, 0.0, valid=True),
-        _make_peer_obs(20.0, 0.0, valid=True),
-        _make_peer_obs(30.0, 0.0, valid=True),
+        _make_peer_obs(0.0, 10.0, valid=True),
+        _make_peer_obs(0.0, 20.0, valid=True),
+        _make_peer_obs(0.0, 30.0, valid=True),
     ]
 
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
@@ -96,9 +98,10 @@ def test_build_observation_skips_invalid_peers():
     """Invalid peers are masked out."""
     builder = ObservationBuilder()
     ego_state = _make_ego_state()
+    # Peer North (Forward)
     peers = [
-        _make_peer_obs(10.0, 0.0, valid=True),
-        _make_peer_obs(20.0, 0.0, valid=False),
+        _make_peer_obs(0.0, 10.0, valid=True),
+        _make_peer_obs(0.0, 20.0, valid=False),
     ]
 
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))

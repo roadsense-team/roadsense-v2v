@@ -26,6 +26,34 @@ class ObservationBuilder:
     MAX_ACCEL = 10.0
     STALENESS_THRESHOLD = 500.0
 
+    def is_in_cone(
+        self,
+        ego_heading_deg: float,
+        ego_pos: Tuple[float, float],
+        peer_x: float,
+        peer_y: float,
+        half_angle_deg: float = 45.0,
+    ) -> bool:
+        """
+        Return True when peer lies inside ego's forward cone.
+        
+        Uses SUMO coordinates (0=North, clockwise).
+        """
+        dx = peer_x - ego_pos[0]
+        dy = peer_y - ego_pos[1]
+        
+        # Bearing in standard Cartesian (0=East, counter-clockwise)
+        bearing_rad = math.atan2(dy, dx)
+        bearing_deg = math.degrees(bearing_rad)
+        
+        # Convert Cartesian bearing to SUMO angle (0=North, clockwise)
+        # SUMO_angle = 90 - Cartesian_angle
+        peer_sumo_angle = (90.0 - bearing_deg + 360.0) % 360.0
+        
+        # Calculate angular difference in SUMO frame
+        diff = (peer_sumo_angle - ego_heading_deg + 180.0) % 360.0 - 180.0
+        return abs(diff) <= half_angle_deg
+
     def build(
         self,
         ego_state: VehicleState,
@@ -38,36 +66,41 @@ class ObservationBuilder:
         Returns:
             Dict with 'ego', 'peers', and 'peer_mask' arrays
         """
-        ego_heading_rad = math.radians(ego_state.heading)
-        ego_heading_rad = (ego_heading_rad + math.pi) % (2 * math.pi) - math.pi
+        ego_heading_deg = ego_state.heading
+        
+        filtered_peers = []
+        for peer in peer_observations:
+            if not peer.get("valid", True):
+                continue
+            if self.is_in_cone(ego_heading_deg, ego_pos, peer["x"], peer["y"]):
+                filtered_peers.append(peer)
 
         peers = np.zeros((self.MAX_PEERS, 6), dtype=np.float32)
         peer_mask = np.zeros((self.MAX_PEERS,), dtype=np.float32)
 
         valid_count = 0
-        for peer in peer_observations[: self.MAX_PEERS]:
-            if not peer.get("valid", True):
-                continue
+        # Ego heading in Cartesian for rotation
+        ego_phi_rad = math.radians(90.0 - ego_heading_deg)
 
+        for peer in filtered_peers[: self.MAX_PEERS]:
             dx = peer["x"] - ego_pos[0]
             dy = peer["y"] - ego_pos[1]
 
-            cos_h = math.cos(-ego_heading_rad)
-            sin_h = math.sin(-ego_heading_rad)
-            rel_x = dx * cos_h - dy * sin_h
-            rel_y = dx * sin_h + dy * cos_h
+            # Rotate to ego's local frame (rel_x = forward, rel_y = left)
+            cos_phi = math.cos(ego_phi_rad)
+            sin_phi = math.sin(ego_phi_rad)
+            rel_x = dx * cos_phi + dy * sin_phi
+            rel_y = -dx * sin_phi + dy * cos_phi
 
             rel_speed = peer["speed"] - ego_state.speed
-            peer_heading_rad = math.radians(peer["heading"])
-            rel_heading = peer_heading_rad - ego_heading_rad
-            rel_heading = (rel_heading + math.pi) % (2 * math.pi) - math.pi
+            rel_heading = (peer["heading"] - ego_heading_deg + 180.0) % 360.0 - 180.0
 
             peers[valid_count] = np.array(
                 [
                     rel_x / self.MAX_DISTANCE,
                     rel_y / self.MAX_DISTANCE,
                     rel_speed / self.MAX_SPEED,
-                    rel_heading / math.pi,
+                    rel_heading / 180.0,  # Normalized to [-1, 1]
                     peer["accel"] / self.MAX_ACCEL,
                     peer["age_ms"] / self.STALENESS_THRESHOLD,
                 ],
@@ -80,7 +113,7 @@ class ObservationBuilder:
             [
                 ego_state.speed / self.MAX_SPEED,
                 ego_state.acceleration / self.MAX_ACCEL,
-                ego_heading_rad / math.pi,
+                ((ego_heading_deg + 180.0) % 360.0 - 180.0) / 180.0,
                 valid_count / self.MAX_PEERS,
             ],
             dtype=np.float32,

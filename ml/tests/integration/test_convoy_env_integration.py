@@ -20,7 +20,7 @@ SUMO_AVAILABLE = os.system("sumo --version > /dev/null 2>&1") == 0
 @pytest.fixture
 def env(scenario_path):
     """ConvoyEnv with real SUMO."""
-    from envs.convoy_env import ConvoyEnv
+    from ml.envs.convoy_env import ConvoyEnv
 
     env = ConvoyEnv(
         sumo_cfg=scenario_path,
@@ -110,7 +110,7 @@ def test_gym_make_creates_convoy_env(scenario_path):
 
     try:
         assert env is not None
-        from envs.convoy_env import ConvoyEnv
+        from ml.envs.convoy_env import ConvoyEnv
         assert isinstance(env.unwrapped, ConvoyEnv)
     finally:
         env.close()
@@ -148,7 +148,7 @@ def test_registered_env_has_correct_observation_space(scenario_path):
 @pytest.mark.skipif(not SUMO_AVAILABLE, reason="SUMO not installed")
 def test_registered_env_has_correct_action_space(scenario_path):
     """
-    action_space is Discrete(4).
+    action_space is Box(1,) in [0,1].
     """
     import gymnasium as gym
     import ml.envs
@@ -160,9 +160,11 @@ def test_registered_env_has_correct_action_space(scenario_path):
     )
 
     try:
-        from gymnasium.spaces import Discrete
-        assert isinstance(env.action_space, Discrete)
-        assert env.action_space.n == 4
+        from gymnasium.spaces import Box
+        assert isinstance(env.action_space, Box)
+        assert env.action_space.shape == (1,)
+        assert env.action_space.low[0] == pytest.approx(0.0)
+        assert env.action_space.high[0] == pytest.approx(1.0)
     finally:
         env.close()
 
@@ -180,7 +182,7 @@ def test_random_agent_100_episodes_no_crash(scenario_path):
     - Emulator queue clearing
     - Memory leaks
     """
-    from envs.convoy_env import ConvoyEnv
+    from ml.envs.convoy_env import ConvoyEnv
 
     env = ConvoyEnv(
         sumo_cfg=scenario_path,
@@ -218,7 +220,7 @@ def test_check_env_passes(scenario_path):
     - No common Gymnasium API violations
     """
     from stable_baselines3.common.env_checker import check_env
-    from envs.convoy_env import ConvoyEnv
+    from ml.envs.convoy_env import ConvoyEnv
 
     env = ConvoyEnv(
         sumo_cfg=scenario_path,
