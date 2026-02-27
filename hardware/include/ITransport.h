@@ -31,10 +31,11 @@ public:
      * @typedef ReceiveCallback
      * @brief Callback function type for incoming messages
      *
+     * @param mac Sender MAC address (6 bytes)
      * @param data Pointer to received data buffer
      * @param len Length of received data in bytes
      */
-    using ReceiveCallback = std::function<void(const uint8_t* data, size_t len)>;
+    using ReceiveCallback = std::function<void(const uint8_t* mac, const uint8_t* data, size_t len)>;
 
     /**
      * @brief Virtual destructor for proper cleanup

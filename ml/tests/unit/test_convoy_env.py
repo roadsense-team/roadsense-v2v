@@ -8,9 +8,10 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 
-from envs.convoy_env import ConvoyEnv
+from ml.envs.convoy_env import ConvoyEnv
 from envs.observation_builder import ObservationBuilder
 from envs.sumo_connection import VehicleState
+from espnow_emulator.espnow_emulator import ReceivedMessage, V2VMessage
 
 
 def _make_state(
@@ -33,6 +34,38 @@ def _make_state(
 
 def _set_states(mock_sumo: Mock, states: dict) -> None:
     mock_sumo.get_vehicle_state = Mock(side_effect=lambda vid: states[vid])
+
+
+def _make_received_message(
+    source_id: str,
+    x: float,
+    y: float,
+    age_ms: int,
+    hop_count: int,
+    timestamp_ms: int = 1000,
+) -> ReceivedMessage:
+    meters_per_deg = 111000.0
+    msg = V2VMessage(
+        vehicle_id=source_id,
+        lat=y / meters_per_deg,
+        lon=x / meters_per_deg,
+        speed=15.0,
+        heading=0.0,
+        accel_x=0.0,
+        accel_y=0.0,
+        accel_z=9.81,
+        gyro_x=0.0,
+        gyro_y=0.0,
+        gyro_z=0.0,
+        timestamp_ms=timestamp_ms,
+        hop_count=hop_count,
+        source_id=source_id,
+    )
+    return ReceivedMessage(
+        message=msg,
+        age_ms=age_ms,
+        received_at_ms=timestamp_ms + age_ms,
+    )
 
 
 def _make_dataset_dir(dataset_dir: Path) -> None:
@@ -85,8 +118,7 @@ def mock_emulator():
     """Mock ESPNOWEmulator for unit tests."""
     mock = Mock()
     mock.clear = Mock()
-    mock.transmit = Mock(return_value=None)
-    mock.sync_and_get_messages = Mock(return_value={})
+    mock.simulate_mesh_step = Mock(return_value={})
     return mock
 
 
@@ -124,8 +156,110 @@ def test_step_accepts_numpy_action(env_with_mocks):
     assert isinstance(obs, dict)
     assert isinstance(info, dict)
 
-    result = env_with_mocks.step(np.array([0], dtype=np.int64))
+    result = env_with_mocks.step(np.array([0.3], dtype=np.float32))
 
+    assert isinstance(result, tuple)
+    assert len(result) == 5
+
+
+def test_action_space_is_box_1(env_with_mocks):
+    """action_space is Box(shape=(1,)) with range [0,1]."""
+    from gymnasium.spaces import Box
+
+    assert isinstance(env_with_mocks.action_space, Box)
+    assert env_with_mocks.action_space.shape == (1,)
+    assert env_with_mocks.action_space.low[0] == pytest.approx(0.0)
+    assert env_with_mocks.action_space.high[0] == pytest.approx(1.0)
+
+
+def test_convoy_env_uses_simulate_mesh_step(env_with_mocks, mock_sumo, mock_emulator):
+    """_step_espnow delegates to emulator simulate_mesh_step."""
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0),
+        "V002": _make_state("V002", x=0.0, y=20.0),
+        "V003": _make_state("V003", x=0.0, y=40.0),
+    }
+    _set_states(mock_sumo, states)
+
+    env_with_mocks._step_espnow(states["V001"], current_time_ms=1000)
+
+    mock_emulator.simulate_mesh_step.assert_called_once_with(
+        vehicle_states=states,
+        ego_id="V001",
+        current_time_ms=1000,
+    )
+
+
+def test_convoy_env_mesh_step_returns_correct_peer_count(
+    env_with_mocks,
+    mock_sumo,
+    mock_emulator,
+):
+    """Observation mask reflects direct + relayed peer count from mesh."""
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0),
+        "V002": _make_state("V002", x=0.0, y=20.0),
+        "V003": _make_state("V003", x=0.0, y=40.0),
+    }
+    _set_states(mock_sumo, states)
+    mock_emulator.simulate_mesh_step.return_value = {
+        "V002": _make_received_message("V002", x=0.0, y=20.0, age_ms=10, hop_count=0),
+        "V003": _make_received_message("V003", x=0.0, y=40.0, age_ms=20, hop_count=1),
+    }
+
+    obs, _ = env_with_mocks._step_espnow(states["V001"], current_time_ms=1000)
+
+    assert int(np.count_nonzero(obs["peer_mask"])) == 2
+
+
+def test_convoy_env_observation_includes_relayed_peers(
+    env_with_mocks,
+    mock_sumo,
+    mock_emulator,
+):
+    """Relayed source appears in peer observation features."""
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0),
+        "V002": _make_state("V002", x=0.0, y=20.0),
+        "V003": _make_state("V003", x=0.0, y=100.0),
+    }
+    _set_states(mock_sumo, states)
+    mock_emulator.simulate_mesh_step.return_value = {
+        "V003": _make_received_message("V003", x=0.0, y=100.0, age_ms=14, hop_count=1),
+    }
+
+    obs, _ = env_with_mocks._step_espnow(states["V001"], current_time_ms=1000)
+
+    assert obs["peer_mask"][0] == pytest.approx(1.0)
+    assert obs["peers"][0][0] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_convoy_env_hop_count_reflected_in_message_age(
+    env_with_mocks,
+    mock_sumo,
+    mock_emulator,
+):
+    """Relayed hop latency is preserved in age feature normalization."""
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0),
+        "V002": _make_state("V002", x=0.0, y=20.0),
+        "V003": _make_state("V003", x=0.0, y=40.0),
+    }
+    _set_states(mock_sumo, states)
+    mock_emulator.simulate_mesh_step.return_value = {
+        "V002": _make_received_message("V002", x=0.0, y=20.0, age_ms=14, hop_count=1),
+    }
+
+    obs, _ = env_with_mocks._step_espnow(states["V001"], current_time_ms=1000)
+
+    expected_age_norm = 14.0 / ObservationBuilder.STALENESS_THRESHOLD
+    assert obs["peers"][0][5] == pytest.approx(expected_age_norm)
+
+
+def test_step_accepts_float_action(env_with_mocks):
+    """step() accepts scalar float action."""
+    env_with_mocks.reset()
+    result = env_with_mocks.step(0.5)
     assert isinstance(result, tuple)
     assert len(result) == 5
 

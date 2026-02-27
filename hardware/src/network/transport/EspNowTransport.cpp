@@ -264,6 +264,6 @@ void EspNowTransport::handleDataRecv(const uint8_t* mac, const uint8_t* data, in
 
     // Call user callback if registered
     if (receiveCallback) {
-        receiveCallback(data, len);
+        receiveCallback(mac, data, len);
     }
 }

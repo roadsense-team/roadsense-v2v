@@ -1,11 +1,11 @@
 """
 Unit tests for ConvoyEnv -> ESPNOWEmulator integration (Phase 3).
 """
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from envs.convoy_env import ConvoyEnv
+from ml.envs.convoy_env import ConvoyEnv
 from envs.sumo_connection import VehicleState
-from espnow_emulator.espnow_emulator import ESPNOWEmulator, V2VMessage
+from espnow_emulator.espnow_emulator import ESPNOWEmulator, ReceivedMessage, V2VMessage
 
 
 def _make_state(vehicle_id: str, x: float, y: float, speed: float = 10.0) -> VehicleState:
@@ -20,54 +20,88 @@ def _make_state(vehicle_id: str, x: float, y: float, speed: float = 10.0) -> Veh
     )
 
 
-def test_transmit_vehicle_states_calls_emulator_for_each_peer():
-    """Transmit is called once per peer vehicle."""
+def test_step_espnow_calls_simulate_mesh_step_with_all_states():
+    """_step_espnow delegates to mesh API with all active vehicle states."""
     emulator = MagicMock()
     env = ConvoyEnv(sumo_cfg="dummy.sumocfg", emulator=emulator)
-    ego_state = _make_state("V001", 0.0, 0.0)
-    peers = [_make_state("V002", 10.0, 0.0), _make_state("V003", 20.0, 0.0)]
+    states = {
+        "V001": _make_state("V001", 0.0, 0.0),
+        "V002": _make_state("V002", 10.0, 0.0),
+        "V003": _make_state("V003", 20.0, 0.0),
+    }
+    env.sumo = MagicMock()
+    env.sumo.get_vehicle_state.side_effect = lambda vid: states[vid]
+    emulator.simulate_mesh_step.return_value = {}
 
-    env._transmit_vehicle_states(ego_state, peers, current_time_ms=1000)
+    with patch("traci.vehicle.getIDList", return_value=["V001", "V002", "V003"]):
+        env._step_espnow(states["V001"], current_time_ms=1000)
 
-    assert emulator.transmit.call_count == 2
+    emulator.simulate_mesh_step.assert_called_once_with(
+        vehicle_states=states,
+        ego_id="V001",
+        current_time_ms=1000,
+    )
 
 
-def test_transmit_vehicle_states_uses_sender_and_receiver_positions():
-    """Sender/receiver positions match vehicle states."""
+def test_step_espnow_returns_non_ego_peer_states_for_distance_logic():
+    """Returned peer list still contains all non-ego states."""
     emulator = MagicMock()
     env = ConvoyEnv(sumo_cfg="dummy.sumocfg", emulator=emulator)
-    ego_state = _make_state("V001", 1.0, 2.0)
-    peers = [_make_state("V002", 10.0, 3.0), _make_state("V003", 20.0, 4.0)]
+    states = {
+        "V001": _make_state("V001", 0.0, 0.0),
+        "V002": _make_state("V002", 10.0, 0.0),
+        "V003": _make_state("V003", 20.0, 0.0),
+    }
+    env.sumo = MagicMock()
+    env.sumo.get_vehicle_state.side_effect = lambda vid: states[vid]
+    emulator.simulate_mesh_step.return_value = {}
 
-    env._transmit_vehicle_states(ego_state, peers, current_time_ms=1000)
+    with patch("traci.vehicle.getIDList", return_value=["V001", "V002", "V003"]):
+        _, peer_states = env._step_espnow(states["V001"], current_time_ms=1000)
 
-    for call, peer in zip(emulator.transmit.call_args_list, peers):
-        assert call.kwargs["sender_pos"] == (peer.x, peer.y)
-        assert call.kwargs["receiver_pos"] == (ego_state.x, ego_state.y)
+    assert {state.vehicle_id for state in peer_states} == {"V002", "V003"}
 
 
-def test_transmit_vehicle_states_sets_message_timestamp():
-    """Sender message timestamp matches current time."""
+def test_step_espnow_uses_mesh_messages_to_build_peer_observation():
+    """Observation peer count follows mesh-visible messages."""
     emulator = MagicMock()
     env = ConvoyEnv(sumo_cfg="dummy.sumocfg", emulator=emulator)
-    ego_state = _make_state("V001", 0.0, 0.0)
-    peers = [_make_state("V002", 10.0, 0.0)]
+    states = {
+        "V001": _make_state("V001", 0.0, 0.0),
+        "V002": _make_state("V002", 0.0, 30.0),
+    }
+    env.sumo = MagicMock()
+    env.sumo.get_vehicle_state.side_effect = lambda vid: states[vid]
+    msg = states["V002"].to_v2v_message(timestamp_ms=1000)
+    emulator.simulate_mesh_step.return_value = {
+        "V002": ReceivedMessage(message=msg, age_ms=12, received_at_ms=1012)
+    }
 
-    env._transmit_vehicle_states(ego_state, peers, current_time_ms=1234)
+    with patch("traci.vehicle.getIDList", return_value=["V001", "V002"]):
+        obs, _ = env._step_espnow(states["V001"], current_time_ms=1000)
 
-    sent_msg = emulator.transmit.call_args.kwargs["sender_msg"]
-    assert sent_msg.timestamp_ms == 1234
+    assert int(obs["peer_mask"].sum()) == 1
 
 
-def test_transmit_vehicle_states_empty_peer_list_no_calls():
-    """No peers means no transmissions."""
+def test_step_espnow_normalizes_mesh_message_age():
+    """Age feature reflects mesh age_ms from relay chain."""
     emulator = MagicMock()
     env = ConvoyEnv(sumo_cfg="dummy.sumocfg", emulator=emulator)
-    ego_state = _make_state("V001", 0.0, 0.0)
+    states = {
+        "V001": _make_state("V001", 0.0, 0.0),
+        "V002": _make_state("V002", 0.0, 30.0),
+    }
+    env.sumo = MagicMock()
+    env.sumo.get_vehicle_state.side_effect = lambda vid: states[vid]
+    msg = states["V002"].to_v2v_message(timestamp_ms=1000)
+    emulator.simulate_mesh_step.return_value = {
+        "V002": ReceivedMessage(message=msg, age_ms=14, received_at_ms=1014)
+    }
 
-    env._transmit_vehicle_states(ego_state, [], current_time_ms=1000)
+    with patch("traci.vehicle.getIDList", return_value=["V001", "V002"]):
+        obs, _ = env._step_espnow(states["V001"], current_time_ms=1000)
 
-    emulator.transmit.assert_not_called()
+    assert obs["peers"][0][5] == 14.0 / env.obs_builder.STALENESS_THRESHOLD
 
 
 def test_message_not_visible_before_arrival_time():

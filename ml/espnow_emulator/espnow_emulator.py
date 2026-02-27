@@ -116,8 +116,8 @@ import json
 import random
 import math
 import numpy as np
-from dataclasses import dataclass
-from typing import Optional, Dict, List, Tuple
+from dataclasses import dataclass, replace
+from typing import Any, Optional, Dict, List, Tuple
 from queue import PriorityQueue
 
 
@@ -155,6 +155,8 @@ class V2VMessage:
     gyro_y: float
     gyro_z: float
     timestamp_ms: int
+    hop_count: int = 0
+    source_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -621,9 +623,246 @@ class ESPNOWEmulator:
             gyro_y=msg.gyro_y + self._rng.gauss(0, noise.get('gyro_std_rad_s', 0.01)),
             gyro_z=msg.gyro_z + self._rng.gauss(0, noise.get('gyro_std_rad_s', 0.01)),
             timestamp_ms=msg.timestamp_ms,
+            hop_count=msg.hop_count,
+            source_id=msg.source_id,
         )
 
         return noisy
+
+    def _mesh_max_range_m(self) -> float:
+        """Get hard communication range for mesh simulation."""
+        packet_cfg = self.params.get('packet_loss', {})
+        return float(packet_cfg.get('max_range_m', packet_cfg.get('distance_threshold_2', float('inf'))))
+
+    def _is_in_cone(
+        self,
+        ego_heading_deg: float,
+        ego_pos: Tuple[float, float],
+        peer_pos: Tuple[float, float],
+        half_angle_deg: float,
+    ) -> bool:
+        """
+        Check whether peer lies inside ego's forward cone in SUMO frame.
+
+        SUMO heading convention:
+        - 0 degrees: North
+        - Positive angles rotate clockwise
+        """
+        dx = peer_pos[0] - ego_pos[0]
+        dy = peer_pos[1] - ego_pos[1]
+        bearing_deg = math.degrees(math.atan2(dy, dx))
+        peer_sumo_angle = (90.0 - bearing_deg + 360.0) % 360.0
+        diff = (peer_sumo_angle - ego_heading_deg + 180.0) % 360.0 - 180.0
+        return abs(diff) <= half_angle_deg
+
+    def _message_key(self, msg: V2VMessage) -> Tuple[str, int]:
+        source_id = msg.source_id or msg.vehicle_id
+        return source_id, msg.timestamp_ms
+
+    def _build_message_from_state(self, state: Any, timestamp_ms: int) -> V2VMessage:
+        """
+        Build a V2VMessage from a state object.
+
+        Uses state.to_v2v_message() when available; otherwise falls back to
+        state attributes expected from VehicleState-like objects.
+        """
+        if hasattr(state, "to_v2v_message"):
+            msg = state.to_v2v_message(timestamp_ms=timestamp_ms)
+        else:
+            meters_per_deg = self.METERS_PER_DEG_LAT
+            msg = V2VMessage(
+                vehicle_id=getattr(state, "vehicle_id"),
+                lat=float(getattr(state, "y", 0.0)) / meters_per_deg,
+                lon=float(getattr(state, "x", 0.0)) / meters_per_deg,
+                speed=float(getattr(state, "speed", 0.0)),
+                heading=float(getattr(state, "heading", 0.0)),
+                accel_x=float(getattr(state, "acceleration", 0.0)),
+                accel_y=0.0,
+                accel_z=9.81,
+                gyro_x=0.0,
+                gyro_y=0.0,
+                gyro_z=0.0,
+                timestamp_ms=timestamp_ms,
+            )
+        source_id = msg.source_id or msg.vehicle_id
+        return replace(msg, hop_count=0, source_id=source_id)
+
+    def _merge_prefer_freshest(
+        self,
+        existing: Optional[ReceivedMessage],
+        candidate: ReceivedMessage,
+    ) -> ReceivedMessage:
+        """
+        Deduplicate candidates for the same source/timestamp.
+
+        Priority:
+        1. Lower total age_ms (earlier/faster path)
+        2. Lower hop_count
+        """
+        if existing is None:
+            return candidate
+        if candidate.age_ms < existing.age_ms:
+            return candidate
+        if candidate.age_ms > existing.age_ms:
+            return existing
+        if candidate.message.hop_count < existing.message.hop_count:
+            return candidate
+        return existing
+
+    def _simulate_link(
+        self,
+        link_sender_id: str,
+        base_message: V2VMessage,
+        sender_pos: Tuple[float, float],
+        receiver_pos: Tuple[float, float],
+        current_time_ms: int,
+        prior_age_ms: int,
+    ) -> Optional[ReceivedMessage]:
+        """
+        Simulate one mesh link transmission without queue side effects.
+
+        Returns ReceivedMessage with cumulative age_ms from source to receiver.
+        """
+        distance = self._calculate_distance(sender_pos, receiver_pos)
+        if distance > self._mesh_max_range_m():
+            self.last_loss_state[link_sender_id] = True
+            return None
+
+        loss_prob = self._get_loss_probability(distance)
+        if self._check_burst_loss(link_sender_id):
+            burst_cfg = self.params['burst_loss']
+            loss_prob = min(
+                burst_cfg['max_loss_cap'],
+                loss_prob * burst_cfg['loss_multiplier']
+            )
+
+        was_lost = self._rng.random() < loss_prob
+        self.last_loss_state[link_sender_id] = was_lost
+        if was_lost:
+            return None
+
+        link_latency_ms = int(self._get_latency(distance))
+        cumulative_age_ms = prior_age_ms + link_latency_ms
+        noisy_message = self._add_sensor_noise(base_message)
+        return ReceivedMessage(
+            message=noisy_message,
+            age_ms=cumulative_age_ms,
+            received_at_ms=current_time_ms + cumulative_age_ms,
+        )
+
+    def simulate_mesh_step(
+        self,
+        vehicle_states: Dict[str, Any],
+        ego_id: str,
+        current_time_ms: int,
+        cone_half_angle_deg: float = 45.0,
+    ) -> Dict[str, ReceivedMessage]:
+        """
+        Simulate one mesh broadcast cycle and return messages visible to ego.
+
+        Each vehicle broadcasts its own state and may relay source messages
+        that are in its front cone. Relay paths are deduplicated by
+        (source_id, timestamp_ms), preferring lower age/hop paths.
+        """
+        if ego_id not in vehicle_states:
+            raise KeyError(f"Ego vehicle '{ego_id}' missing from vehicle_states")
+
+        vehicle_ids = list(vehicle_states.keys())
+        known_by_vehicle: Dict[str, Dict[Tuple[str, int], ReceivedMessage]] = {}
+
+        for vehicle_id, state in vehicle_states.items():
+            own_msg = self._build_message_from_state(state, timestamp_ms=current_time_ms)
+            own_key = self._message_key(own_msg)
+            known_by_vehicle[vehicle_id] = {
+                own_key: ReceivedMessage(
+                    message=own_msg,
+                    age_ms=0,
+                    received_at_ms=current_time_ms,
+                )
+            }
+
+        max_rounds = max(0, len(vehicle_ids) - 1)
+        for _ in range(max_rounds):
+            round_changed = False
+            sender_snapshot = {
+                sender_id: list(known_messages.values())
+                for sender_id, known_messages in known_by_vehicle.items()
+            }
+
+            for sender_id in vehicle_ids:
+                sender_state = vehicle_states[sender_id]
+                sender_pos = (float(getattr(sender_state, "x")), float(getattr(sender_state, "y")))
+                sender_heading = float(getattr(sender_state, "heading", 0.0))
+
+                for receiver_id in vehicle_ids:
+                    if receiver_id == sender_id:
+                        continue
+
+                    receiver_state = vehicle_states[receiver_id]
+                    receiver_pos = (float(getattr(receiver_state, "x")), float(getattr(receiver_state, "y")))
+
+                    for inbound in sender_snapshot[sender_id]:
+                        source_id = inbound.message.source_id or inbound.message.vehicle_id
+
+                        if source_id != sender_id:
+                            source_state = vehicle_states.get(source_id)
+                            if source_state is None:
+                                continue
+
+                            source_pos = (
+                                float(getattr(source_state, "x")),
+                                float(getattr(source_state, "y")),
+                            )
+                            if not self._is_in_cone(
+                                ego_heading_deg=sender_heading,
+                                ego_pos=sender_pos,
+                                peer_pos=source_pos,
+                                half_angle_deg=cone_half_angle_deg,
+                            ):
+                                continue
+
+                            next_hop_count = inbound.message.hop_count + 1
+                        else:
+                            next_hop_count = 0
+
+                        outbound_msg = replace(
+                            inbound.message,
+                            source_id=source_id,
+                            hop_count=next_hop_count,
+                        )
+                        delivered = self._simulate_link(
+                            link_sender_id=sender_id,
+                            base_message=outbound_msg,
+                            sender_pos=sender_pos,
+                            receiver_pos=receiver_pos,
+                            current_time_ms=current_time_ms,
+                            prior_age_ms=inbound.age_ms,
+                        )
+                        if delivered is None:
+                            continue
+
+                        msg_key = self._message_key(delivered.message)
+                        existing = known_by_vehicle[receiver_id].get(msg_key)
+                        merged = self._merge_prefer_freshest(existing, delivered)
+                        if existing is None or merged != existing:
+                            known_by_vehicle[receiver_id][msg_key] = merged
+                            round_changed = True
+
+            if not round_changed:
+                break
+
+        ego_visible: Dict[str, ReceivedMessage] = {}
+        for received in known_by_vehicle[ego_id].values():
+            source_id = received.message.source_id or received.message.vehicle_id
+            if source_id == ego_id:
+                continue
+
+            existing = ego_visible.get(source_id)
+            merged = self._merge_prefer_freshest(existing, received)
+            if existing is None or merged != existing:
+                ego_visible[source_id] = merged
+
+        return ego_visible
 
     def _check_burst_loss(self, vehicle_id: str) -> bool:
         """
