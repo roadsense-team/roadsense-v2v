@@ -111,7 +111,7 @@ void test_csv_row_format() {
 }
 
 // ============================================================================
-// TEST 1B: Mode 1 TX row has expected 16 columns
+// TEST 1B: Mode 1 TX row has expected 18 columns
 // ============================================================================
 void test_mode1_tx_row_column_count() {
     V2VMessage msg = createMockV2VMessage();
@@ -119,12 +119,12 @@ void test_mode1_tx_row_column_count() {
 
     size_t written = DataLogger::formatCharacterizationTxRow(row, sizeof(row), 123456, msg);
     TEST_ASSERT_GREATER_THAN(0, (int)written);
-    TEST_ASSERT_EQUAL_INT(15, countCommas(row)); // 16 columns = 15 commas
+    TEST_ASSERT_EQUAL_INT(17, countCommas(row)); // 18 columns = 17 commas
     TEST_ASSERT_TRUE(strstr(row, "21.50") != NULL);  // mag_x value present
 }
 
 // ============================================================================
-// TEST 1C: Mode 1 RX row has expected 16 columns
+// TEST 1C: Mode 1 RX row has expected 18 columns
 // ============================================================================
 void test_mode1_rx_row_column_count() {
     V2VMessage msg = createMockV2VMessage();
@@ -132,7 +132,7 @@ void test_mode1_rx_row_column_count() {
 
     size_t written = DataLogger::formatCharacterizationRxRow(row, sizeof(row), 123457, msg);
     TEST_ASSERT_GREATER_THAN(0, (int)written);
-    TEST_ASSERT_EQUAL_INT(15, countCommas(row)); // 16 columns = 15 commas
+    TEST_ASSERT_EQUAL_INT(17, countCommas(row)); // 18 columns = 17 commas
     TEST_ASSERT_TRUE(strstr(row, "-4.20") != NULL); // mag_y value present
 }
 

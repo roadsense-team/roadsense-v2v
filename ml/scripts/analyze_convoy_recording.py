@@ -33,7 +33,25 @@ except Exception:
 
 
 VEHICLES = ("V001", "V002", "V003")
-EXPECTED_COLUMNS = 16
+MIN_EXPECTED_COLUMNS = 16
+SENDER_COLUMN_CANDIDATES = ("from_vehicle_id", "vehicle_id")
+REQUIRED_NUMERIC_COLUMNS = (
+    "timestamp_local_ms",
+    "msg_timestamp",
+    "lat",
+    "lon",
+    "speed",
+    "heading",
+    "accel_x",
+    "accel_y",
+    "accel_z",
+    "gyro_x",
+    "gyro_y",
+    "gyro_z",
+    "mag_x",
+    "mag_y",
+    "mag_z",
+)
 GPS_METERS_PER_DEG_LAT = 110540.0
 GPS_METERS_PER_DEG_LON_AT_EQUATOR = 111320.0
 MAX_PEERS = 8
@@ -227,36 +245,66 @@ def parse_convoy_csv(path: Path, vehicle: str, log_type: str) -> ParsedCSV:
         header = next(reader, None)
         if header is None:
             raise ValueError(f"{path} has no header")
-        if len(header) != EXPECTED_COLUMNS:
-            raise ValueError(f"{path} header has {len(header)} columns, expected {EXPECTED_COLUMNS}")
+        if len(header) < MIN_EXPECTED_COLUMNS:
+            raise ValueError(f"{path} header has {len(header)} columns, expected at least {MIN_EXPECTED_COLUMNS}")
+
+        header_map = {name.strip(): idx for idx, name in enumerate(header)}
+        sender_col_name = next((name for name in SENDER_COLUMN_CANDIDATES if name in header_map), None)
+        if sender_col_name is None:
+            raise ValueError(f"{path} missing sender id column (expected one of {SENDER_COLUMN_CANDIDATES})")
+
+        missing_required = [name for name in REQUIRED_NUMERIC_COLUMNS if name not in header_map]
+        if missing_required:
+            raise ValueError(f"{path} missing required columns: {missing_required}")
+
         third_col_name = header[2]
+        row_width = len(header)
 
         for row in reader:
             rows_total += 1
-            if len(row) != EXPECTED_COLUMNS:
+            if len(row) != row_width:
                 malformed_rows += 1
                 continue
-            if any(cell.strip() == "" for cell in row):
+
+            required_indexes = (
+                header_map["timestamp_local_ms"],
+                header_map["msg_timestamp"],
+                header_map[sender_col_name],
+                header_map["lat"],
+                header_map["lon"],
+                header_map["speed"],
+                header_map["heading"],
+                header_map["accel_x"],
+                header_map["accel_y"],
+                header_map["accel_z"],
+                header_map["gyro_x"],
+                header_map["gyro_y"],
+                header_map["gyro_z"],
+                header_map["mag_x"],
+                header_map["mag_y"],
+                header_map["mag_z"],
+            )
+            if any(row[idx].strip() == "" for idx in required_indexes):
                 missing_rows += 1
                 continue
 
             try:
-                cols["timestamp_local_ms"].append(_safe_int(row[0]))
-                cols["msg_timestamp"].append(_safe_int(row[1]))
-                cols["sender_id"].append(row[2].strip())
-                cols["lat"].append(_safe_float(row[3]))
-                cols["lon"].append(_safe_float(row[4]))
-                cols["speed"].append(_safe_float(row[5]))
-                cols["heading"].append(_safe_float(row[6]))
-                cols["accel_x"].append(_safe_float(row[7]))
-                cols["accel_y"].append(_safe_float(row[8]))
-                cols["accel_z"].append(_safe_float(row[9]))
-                cols["gyro_x"].append(_safe_float(row[10]))
-                cols["gyro_y"].append(_safe_float(row[11]))
-                cols["gyro_z"].append(_safe_float(row[12]))
-                cols["mag_x"].append(_safe_float(row[13]))
-                cols["mag_y"].append(_safe_float(row[14]))
-                cols["mag_z"].append(_safe_float(row[15]))
+                cols["timestamp_local_ms"].append(_safe_int(row[header_map["timestamp_local_ms"]]))
+                cols["msg_timestamp"].append(_safe_int(row[header_map["msg_timestamp"]]))
+                cols["sender_id"].append(row[header_map[sender_col_name]].strip())
+                cols["lat"].append(_safe_float(row[header_map["lat"]]))
+                cols["lon"].append(_safe_float(row[header_map["lon"]]))
+                cols["speed"].append(_safe_float(row[header_map["speed"]]))
+                cols["heading"].append(_safe_float(row[header_map["heading"]]))
+                cols["accel_x"].append(_safe_float(row[header_map["accel_x"]]))
+                cols["accel_y"].append(_safe_float(row[header_map["accel_y"]]))
+                cols["accel_z"].append(_safe_float(row[header_map["accel_z"]]))
+                cols["gyro_x"].append(_safe_float(row[header_map["gyro_x"]]))
+                cols["gyro_y"].append(_safe_float(row[header_map["gyro_y"]]))
+                cols["gyro_z"].append(_safe_float(row[header_map["gyro_z"]]))
+                cols["mag_x"].append(_safe_float(row[header_map["mag_x"]]))
+                cols["mag_y"].append(_safe_float(row[header_map["mag_y"]]))
+                cols["mag_z"].append(_safe_float(row[header_map["mag_z"]]))
             except ValueError:
                 malformed_rows += 1
                 continue
