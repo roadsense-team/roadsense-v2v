@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-Analyze a 3-vehicle convoy recording (V001, V002, V003) and produce:
+Analyze convoy field recordings and produce:
   - convoy_analysis_report.md
   - convoy_emulator_params.json
   - convoy_observations.npz
   - convoy_events.json
   - data_quality_summary.json
   - figures/*.png
+
+Supported input layouts:
+  1) Legacy 6-file mode: V001/V002/V003 each with tx/rx
+  2) Ego-only mesh mode: V001 tx/rx only
 
 Usage (from roadsense-v2v/ml with venv activated):
   python scripts/analyze_convoy_recording.py
@@ -211,8 +215,19 @@ def find_single_file(root: Path, vehicle: str, log_type: str) -> Path:
     pattern = f"{vehicle}_{log_type}_*.csv"
     matches = sorted((root / vehicle).glob(pattern))
     if not matches:
-        raise FileNotFoundError(f"Missing {log_type} CSV for {vehicle} in {root / vehicle}")
+        matches = sorted(root.glob(pattern))
+    if not matches:
+        raise FileNotFoundError(
+            f"Missing {log_type} CSV for {vehicle} (checked {root / vehicle} and {root})"
+        )
     return matches[-1]
+
+
+def find_optional_file(root: Path, vehicle: str, log_type: str) -> Optional[Path]:
+    try:
+        return find_single_file(root, vehicle, log_type)
+    except FileNotFoundError:
+        return None
 
 
 def parse_convoy_csv(path: Path, vehicle: str, log_type: str) -> ParsedCSV:
@@ -1015,6 +1030,111 @@ def build_observations_v002(
     }
 
 
+def build_observations_from_ego(
+    logs: Dict[str, Dict[str, ParsedCSV]],
+    ego_vehicle: str,
+    ref_lat: float,
+    ref_lon: float,
+) -> Dict[str, np.ndarray]:
+    ego_tx = logs[ego_vehicle]["tx"].data
+    rx = logs[ego_vehicle]["rx"].data
+
+    ego_t = ego_tx["timestamp_local_ms"].astype(np.int64)
+    n = ego_t.size
+    ego_lat = ego_tx["lat"]
+    ego_lon = ego_tx["lon"]
+    ego_speed = ego_tx["speed"]
+    ego_heading_deg = ego_tx["heading"]
+    ego_accel_x = ego_tx["accel_x"]
+    ego_x, ego_y = latlon_to_xy(ego_lat, ego_lon, ref_lat, ref_lon)
+    ego_gps_valid = valid_gps(ego_lat, ego_lon)
+
+    sender_ids = sorted({str(v) for v in rx["sender_id"].tolist() if str(v)})
+    sender_ids = [sid for sid in sender_ids if sid != ego_vehicle]
+    if not sender_ids:
+        sender_ids = []
+
+    peer_msgs: Dict[str, Dict[str, np.ndarray]] = {}
+    for sender in sender_ids:
+        m = rx["sender_id"] == sender
+        order = np.argsort(rx["timestamp_local_ms"][m])
+        peer_msgs[sender] = {
+            "rx_t": rx["timestamp_local_ms"][m][order].astype(np.int64),
+            "lat": rx["lat"][m][order].astype(float),
+            "lon": rx["lon"][m][order].astype(float),
+            "speed": rx["speed"][m][order].astype(float),
+            "heading": rx["heading"][m][order].astype(float),
+            "accel_x": rx["accel_x"][m][order].astype(float),
+        }
+
+    ego = np.zeros((n, 4), dtype=np.float32)
+    peers = np.zeros((n, MAX_PEERS, 6), dtype=np.float32)
+    peer_mask = np.zeros((n, MAX_PEERS), dtype=np.float32)
+    peer_count = np.zeros((n,), dtype=np.int32)
+
+    for i in range(n):
+        t = int(ego_t[i])
+        ego_heading_rad = wrap_angle_rad(np.array([math.radians(ego_heading_deg[i])], dtype=float))[0]
+        ego[i, 0] = float(ego_speed[i] / 30.0)
+        ego[i, 1] = float(ego_accel_x[i] / 10.0)
+        ego[i, 2] = float(ego_heading_rad / math.pi)
+
+        if not ego_gps_valid[i]:
+            ego[i, 3] = 0.0
+            continue
+
+        valid_peer_idx = 0
+        for sender in sender_ids:
+            msg = peer_msgs[sender]
+            if msg["rx_t"].size == 0:
+                continue
+            idx = int(np.searchsorted(msg["rx_t"], t, side="right") - 1)
+            if idx < 0:
+                continue
+            age = float(t - int(msg["rx_t"][idx]))
+            if age > STALENESS_MS:
+                continue
+
+            px, py = latlon_to_xy(
+                np.array([msg["lat"][idx]], dtype=float),
+                np.array([msg["lon"][idx]], dtype=float),
+                ref_lat,
+                ref_lon,
+            )
+            dx = float(px[0] - ego_x[i])
+            dy = float(py[0] - ego_y[i])
+
+            cos_h = math.cos(-ego_heading_rad)
+            sin_h = math.sin(-ego_heading_rad)
+            rel_x = dx * cos_h - dy * sin_h
+            rel_y = dx * sin_h + dy * cos_h
+
+            rel_speed = float(msg["speed"][idx] - ego_speed[i])
+            peer_heading_rad = math.radians(float(msg["heading"][idx]))
+            rel_heading = wrap_angle_rad(np.array([peer_heading_rad - ego_heading_rad], dtype=float))[0]
+
+            if valid_peer_idx < MAX_PEERS:
+                peers[i, valid_peer_idx, 0] = float(rel_x / 100.0)
+                peers[i, valid_peer_idx, 1] = float(rel_y / 100.0)
+                peers[i, valid_peer_idx, 2] = float(rel_speed / 30.0)
+                peers[i, valid_peer_idx, 3] = float(rel_heading / math.pi)
+                peers[i, valid_peer_idx, 4] = float(msg["accel_x"][idx] / 10.0)
+                peers[i, valid_peer_idx, 5] = float(age / STALENESS_MS)
+                peer_mask[i, valid_peer_idx] = 1.0
+                valid_peer_idx += 1
+
+        peer_count[i] = valid_peer_idx
+        ego[i, 3] = float(valid_peer_idx / MAX_PEERS)
+
+    return {
+        "timestamps_local_ms": ego_t,
+        "ego": ego,
+        "peers": peers,
+        "peer_mask": peer_mask,
+        "peer_count": peer_count,
+    }
+
+
 def summarize_observation_ranges(obs: Dict[str, np.ndarray]) -> Dict:
     ego = obs["ego"]
     peers = obs["peers"]
@@ -1079,6 +1199,143 @@ def compute_zero_peer_windows(obs: Dict[str, np.ndarray]) -> Dict:
                 )
             in_run = False
     return {"count": len(windows), "windows": windows}
+
+
+def detect_input_mode(root: Path) -> Tuple[str, Dict[str, Dict[str, Path]]]:
+    available: Dict[str, Dict[str, Path]] = {}
+    for vehicle in VEHICLES:
+        tx_path = find_optional_file(root, vehicle, "tx")
+        rx_path = find_optional_file(root, vehicle, "rx")
+        if tx_path is not None and rx_path is not None:
+            available[vehicle] = {"tx": tx_path, "rx": rx_path}
+
+    if len(available) == len(VEHICLES):
+        return "full", available
+    if "V001" in available:
+        return "ego_only", {"V001": available["V001"]}
+    raise FileNotFoundError(
+        "Could not find required logs. Need either 6-file mode (V001/V002/V003 tx+rx) "
+        "or ego-only mode (V001 tx+rx)."
+    )
+
+
+def align_vehicle_windows_simple(parsed_tx: ParsedCSV, parsed_rx: ParsedCSV) -> Dict:
+    tx_t = parsed_tx.data["timestamp_local_ms"]
+    rx_t = parsed_rx.data["timestamp_local_ms"]
+    starts = []
+    ends = []
+    if tx_t.size > 0:
+        starts.append(float(tx_t.min()))
+        ends.append(float(tx_t.max()))
+    if rx_t.size > 0:
+        starts.append(float(rx_t.min()))
+        ends.append(float(rx_t.max()))
+
+    overlap_start = float(max(starts)) if starts else None
+    overlap_end = float(min(ends)) if ends else None
+    overlap_duration_s = 0.0
+    if overlap_start is not None and overlap_end is not None and overlap_end > overlap_start:
+        overlap_duration_s = (overlap_end - overlap_start) / 1000.0
+
+    return {
+        "mode": "ego_only",
+        "ranges_in_v001_clock": {
+            "V001_tx": [float(tx_t.min()) if tx_t.size else None, float(tx_t.max()) if tx_t.size else None],
+            "V001_rx": [float(rx_t.min()) if rx_t.size else None, float(rx_t.max()) if rx_t.size else None],
+        },
+        "overlap_window_v001_ms": [overlap_start, overlap_end],
+        "overlap_duration_s": overlap_duration_s,
+    }
+
+
+def compute_link_stats_from_ego_rx(logs: Dict[str, Dict[str, ParsedCSV]], ego_vehicle: str = "V001") -> Dict[str, Dict]:
+    rx = logs[ego_vehicle]["rx"].data
+    out: Dict[str, Dict] = {}
+    sender_ids = sorted({str(v) for v in rx["sender_id"].tolist() if str(v)})
+    sender_ids = [sid for sid in sender_ids if sid != ego_vehicle]
+
+    for sender in sender_ids:
+        ts = np.unique(rx["msg_timestamp"][rx["sender_id"] == sender].astype(np.int64))
+        if ts.size == 0:
+            continue
+
+        # Estimate expected packets from sender's own message clock range at ~10Hz.
+        duration_ms = int(ts[-1] - ts[0]) if ts.size > 1 else 0
+        expected = int(max(ts.size, duration_ms // 100 + 1))
+        est_pdr = float(min(1.0, ts.size / float(expected))) if expected > 0 else float("nan")
+
+        gap_ms = np.diff(ts.astype(float))
+        out[f"{sender}->{ego_vehicle}"] = {
+            "link": f"{sender}->{ego_vehicle}",
+            "sender": sender,
+            "receiver": ego_vehicle,
+            "method": "estimated_from_rx_msg_timestamp_spacing",
+            "tx_in_overlap": expected,
+            "rx_in_overlap": int(ts.size),
+            "matched": int(ts.size),
+            "pdr": est_pdr,
+            "loss_rate": float(1.0 - est_pdr) if np.isfinite(est_pdr) else float("nan"),
+            "missing": int(max(0, expected - ts.size)),
+            "msg_ts_window_ms": [int(ts[0]), int(ts[-1])],
+            "rx_interarrival_ms": basic_stats(gap_ms.astype(float)) if gap_ms.size > 0 else basic_stats(np.array([], dtype=float)),
+        }
+    return out
+
+
+def compute_latency_from_ego_rx(logs: Dict[str, Dict[str, ParsedCSV]], ego_vehicle: str = "V001") -> Dict[str, Dict]:
+    rx = logs[ego_vehicle]["rx"].data
+    out: Dict[str, Dict] = {}
+    sender_ids = sorted({str(v) for v in rx["sender_id"].tolist() if str(v)})
+    sender_ids = [sid for sid in sender_ids if sid != ego_vehicle]
+    for sender in sender_ids:
+        mask = rx["sender_id"] == sender
+        raw = rx["timestamp_local_ms"][mask].astype(float) - rx["msg_timestamp"][mask].astype(float)
+        if raw.size == 0:
+            continue
+        relative = raw - np.median(raw)
+        relative = relative - float(np.percentile(relative, 1))
+        out[f"{sender}->{ego_vehicle}"] = {
+            "link": f"{sender}->{ego_vehicle}",
+            "raw_ms": basic_stats(raw),
+            "relative_ms": basic_stats(relative),
+            "relative_ms_series": relative,
+            "raw_ms_series": raw,
+        }
+    return out
+
+
+def compute_burst_from_ego_rx(logs: Dict[str, Dict[str, ParsedCSV]], ego_vehicle: str = "V001") -> Dict[str, Dict]:
+    rx = logs[ego_vehicle]["rx"].data
+    out: Dict[str, Dict] = {}
+    sender_ids = sorted({str(v) for v in rx["sender_id"].tolist() if str(v)})
+    sender_ids = [sid for sid in sender_ids if sid != ego_vehicle]
+    for sender in sender_ids:
+        ts = np.unique(rx["msg_timestamp"][rx["sender_id"] == sender].astype(np.int64))
+        if ts.size < 2:
+            out[f"{sender}->{ego_vehicle}"] = {
+                "link": f"{sender}->{ego_vehicle}",
+                "method": "estimated_from_rx_msg_timestamp_spacing",
+                "burst_count": 0,
+                "mean_burst_length": 0.0,
+                "max_burst_length": 0,
+                "loss_sequence_len": int(ts.size),
+            }
+            continue
+
+        gaps = np.diff(ts)
+        missing_counts = np.maximum(0, np.rint(gaps / 100.0).astype(int) - 1)
+        lost_flags = (missing_counts > 0).astype(np.int8)
+        bursts = burst_lengths(lost_flags)
+        burst_sizes = [int(missing_counts[i]) for i in np.flatnonzero(lost_flags)]
+        out[f"{sender}->{ego_vehicle}"] = {
+            "link": f"{sender}->{ego_vehicle}",
+            "method": "estimated_from_rx_msg_timestamp_spacing",
+            "burst_count": int(len(bursts)),
+            "mean_burst_length": float(np.mean(burst_sizes)) if burst_sizes else 0.0,
+            "max_burst_length": int(np.max(burst_sizes)) if burst_sizes else 0,
+            "loss_sequence_len": int(ts.size),
+        }
+    return out
 
 
 def discover_default_model(repo_root: Path) -> Optional[Path]:
@@ -1210,7 +1467,7 @@ def extract_trajectories(
     traj_dir.mkdir(parents=True, exist_ok=True)
     out: Dict[str, Dict] = {}
 
-    for vehicle in VEHICLES:
+    for vehicle in sorted(logs.keys()):
         tx = logs[vehicle]["tx"].data
         t = tx["timestamp_local_ms"].astype(np.int64)
         if t.size < 2:
@@ -1327,6 +1584,98 @@ def formation_analysis(
             "d23_m": d23,
             "d13_m": d13,
         },
+    }
+
+
+def formation_analysis_ego(logs: Dict[str, Dict[str, ParsedCSV]], ego_vehicle: str = "V001") -> Dict:
+    ego_tx = logs[ego_vehicle]["tx"].data
+    ego_rx = logs[ego_vehicle]["rx"].data
+
+    t_ego = ego_tx["timestamp_local_ms"].astype(np.int64)
+    if t_ego.size < 2:
+        return {"stats": {}, "formation_class": "unknown", "avg_spacing_m": float("nan"), "series": {}}
+
+    sender_ids = sorted({str(v) for v in ego_rx["sender_id"].tolist() if str(v)})
+    sender_ids = [sid for sid in sender_ids if sid != ego_vehicle]
+    if not sender_ids:
+        return {"stats": {}, "formation_class": "unknown", "avg_spacing_m": float("nan"), "series": {}}
+
+    series_dist: Dict[str, np.ndarray] = {}
+    valid_ego = valid_gps(ego_tx["lat"], ego_tx["lon"])
+    for sender in sender_ids:
+        m = ego_rx["sender_id"] == sender
+        rx_t = ego_rx["timestamp_local_ms"][m].astype(np.int64)
+        rx_lat = ego_rx["lat"][m].astype(float)
+        rx_lon = ego_rx["lon"][m].astype(float)
+        if rx_t.size == 0:
+            continue
+
+        sender_dist = np.full(t_ego.shape, np.nan, dtype=float)
+        for i, t in enumerate(t_ego):
+            if not valid_ego[i]:
+                continue
+            idx = int(np.searchsorted(rx_t, t, side="right") - 1)
+            if idx < 0:
+                continue
+            age_ms = int(t) - int(rx_t[idx])
+            if age_ms > STALENESS_MS:
+                continue
+            if not valid_gps(np.array([rx_lat[idx]]), np.array([rx_lon[idx]])).item():
+                continue
+            sender_dist[i] = float(
+                haversine_m(
+                    np.array([ego_tx["lat"][i]], dtype=float),
+                    np.array([ego_tx["lon"][i]], dtype=float),
+                    np.array([rx_lat[idx]], dtype=float),
+                    np.array([rx_lon[idx]], dtype=float),
+                )[0]
+            )
+
+        series_dist[sender] = sender_dist
+
+    def series_stats(values: np.ndarray) -> Dict[str, float]:
+        v = values[np.isfinite(values)]
+        if v.size == 0:
+            return {"count": 0}
+        return {
+            "count": int(v.size),
+            "mean_m": float(np.mean(v)),
+            "median_m": float(np.median(v)),
+            "p95_m": float(np.percentile(v, 95)),
+            "min_m": float(np.min(v)),
+            "max_m": float(np.max(v)),
+        }
+
+    stats = {f"{ego_vehicle}_{sender}": series_stats(dist) for sender, dist in series_dist.items()}
+    stack = np.vstack([v for v in series_dist.values()]) if series_dist else np.empty((0, t_ego.size))
+    if stack.size > 0:
+        valid_cols = np.any(np.isfinite(stack), axis=0)
+        if np.any(valid_cols):
+            avg_series = np.nanmean(stack[:, valid_cols], axis=0)
+            avg_spacing = float(np.nanmean(avg_series)) if np.any(np.isfinite(avg_series)) else float("nan")
+        else:
+            avg_spacing = float("nan")
+    else:
+        avg_spacing = float("nan")
+
+    if np.isnan(avg_spacing):
+        formation_class = "unknown"
+    elif avg_spacing <= 15.0:
+        formation_class = "tight"
+    elif avg_spacing <= 30.0:
+        formation_class = "moderate"
+    else:
+        formation_class = "loose"
+
+    series_out = {"t_rel_s": (t_ego - t_ego[0]) / 1000.0}
+    for sender, dist in series_dist.items():
+        series_out[f"d_{ego_vehicle}_{sender}_m"] = dist
+
+    return {
+        "stats": stats,
+        "formation_class": formation_class,
+        "avg_spacing_m": avg_spacing,
+        "series": series_out,
     }
 
 
@@ -1766,8 +2115,104 @@ def markdown_report(
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def markdown_report_ego(
+    out_path: Path,
+    data_quality: Dict,
+    temporal: Dict,
+    pdr_links: Dict[str, Dict],
+    latency_by_link: Dict[str, Dict],
+    burst_by_link: Dict[str, Dict],
+    events: Dict,
+    obs_ranges: Dict,
+    zero_peer_windows: Dict,
+    formation: Dict,
+    trajectory_outputs: Dict,
+) -> None:
+    lines: List[str] = []
+    lines.append("# Convoy Analysis Report (Ego-Only Mode)")
+    lines.append("")
+    lines.append("## Scope")
+    lines.append("- Dataset mode: **ego-only mesh logging** (V001 tx/rx).")
+    lines.append("- Peer-side tx/rx files are not required in this mode.")
+    lines.append("- Link quality metrics are estimated from V001 RX message spacing.")
+    lines.append("")
+    lines.append("## Data Validation")
+    lines.append("")
+    lines.append("| File | Rows (valid/total) | GPS fix % | Duration (s) | Duplicates | Gaps >500ms | Sensor status |")
+    lines.append("|---|---:|---:|---:|---:|---:|---|")
+    for rec in data_quality["files"]:
+        lines.append(
+            f"| `{Path(rec['file']).name}` | {rec['rows_valid']}/{rec['rows_total']} | "
+            f"{rec['gps_fix_pct']:.1f} | {rec['duration_s']:.1f} | {rec['duplicate_timestamps']} | "
+            f"{rec['gaps_gt_500ms']} | {rec['sensor_status']} |"
+        )
+    lines.append("")
+    lines.append(f"- TX/RX overlap window on V001 clock: {temporal.get('overlap_duration_s', 0.0):.1f} s")
+    lines.append("")
+    lines.append("## Link Health (Estimated)")
+    lines.append("")
+    if pdr_links:
+        lines.append("| Link | RX packets | Estimated PDR | Estimated Loss | Mean inter-arrival (ms) | p95 inter-arrival (ms) |")
+        lines.append("|---|---:|---:|---:|---:|---:|")
+        for link in sorted(pdr_links.keys()):
+            p = pdr_links[link]
+            ia = p.get("rx_interarrival_ms", {})
+            lines.append(
+                f"| {link} | {p.get('matched', 0)} | {p.get('pdr', float('nan')):.3f} | "
+                f"{p.get('loss_rate', float('nan')):.3f} | {ia.get('mean', float('nan')):.2f} | {ia.get('p95', float('nan')):.2f} |"
+            )
+    else:
+        lines.append("- No peer messages were observed in V001 RX.")
+    lines.append("")
+    lines.append("## Latency / Burst (Estimated)")
+    lines.append("")
+    if latency_by_link:
+        for link in sorted(latency_by_link.keys()):
+            lat = latency_by_link[link]["relative_ms"]
+            burst = burst_by_link.get(link, {})
+            lines.append(
+                f"- {link}: rel latency mean={lat.get('mean', float('nan')):.2f} ms, "
+                f"p95={lat.get('p95', float('nan')):.2f} ms, "
+                f"mean burst={burst.get('mean_burst_length', 0.0):.2f}, "
+                f"max burst={burst.get('max_burst_length', 0)}"
+            )
+    else:
+        lines.append("- No latency stats available (no peer RX).")
+    lines.append("")
+    lines.append("## Event / Observation Checks")
+    lines.append("")
+    lines.append(f"- Selected braking events in V001 TX: {len(events.get('events', []))}.")
+    for ev in events.get("events", []):
+        lines.append(
+            f"  - {ev.get('event_type', 'braking')}: start={ev['start_msg_ms']} ms, "
+            f"end={ev['end_msg_ms']} ms, min_accel={ev['min_accel_x_ms2']:.2f} m/s^2"
+        )
+    lines.append(f"- Zero-peer windows (>500ms): {zero_peer_windows.get('count', 0)}")
+    lines.append(f"- Formation class (ego-based estimate): {formation.get('formation_class', 'unknown')}")
+    lines.append(f"- Average spacing (ego-based estimate): {formation.get('avg_spacing_m', float('nan')):.2f} m")
+    lines.append("")
+    lines.append("## Observation Range Summary")
+    lines.append("")
+    for name in sorted(obs_ranges.keys()):
+        vals = obs_ranges[name]
+        if vals.get("count", 0) == 0:
+            continue
+        lines.append(
+            f"- {name}: min={vals.get('min', float('nan')):.3f}, max={vals.get('max', float('nan')):.3f}, "
+            f"outside[-1.5,1.5]={vals.get('pct_outside_minus1p5_to_1p5', 0.0):.2f}%"
+        )
+    lines.append("")
+    lines.append("## Trajectories")
+    lines.append("")
+    for vehicle, info in trajectory_outputs.items():
+        lines.append(f"- {vehicle}: `{Path(info['csv']).name}` ({info['samples']} samples, {info['duration_s']:.1f}s)")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Analyze 3-car convoy field recording.")
+    parser = argparse.ArgumentParser(description="Analyze convoy field recording (full or ego-only mode).")
     parser.add_argument(
         "--input-root",
         type=Path,
@@ -1797,11 +2242,17 @@ def main() -> int:
         print(f"Input root not found: {args.input_root}", file=sys.stderr)
         return 1
 
+    try:
+        mode, available_paths = detect_input_mode(args.input_root)
+    except Exception as exc:
+        print(f"Failed discovering input mode: {exc}", file=sys.stderr)
+        return 1
+
     logs: Dict[str, Dict[str, ParsedCSV]] = {}
     try:
-        for vehicle in VEHICLES:
-            tx_path = find_single_file(args.input_root, vehicle, "tx")
-            rx_path = find_single_file(args.input_root, vehicle, "rx")
+        for vehicle, paths in available_paths.items():
+            tx_path = paths["tx"]
+            rx_path = paths["rx"]
             logs[vehicle] = {
                 "tx": parse_convoy_csv(tx_path, vehicle, "tx"),
                 "rx": parse_convoy_csv(rx_path, vehicle, "rx"),
@@ -1814,101 +2265,169 @@ def main() -> int:
 
     file_summaries = [
         build_file_validation(logs[v][typ])
-        for v in VEHICLES
+        for v in sorted(logs.keys())
         for typ in ("tx", "rx")
     ]
 
-    temporal = align_vehicle_windows_to_v002(logs)
-    clock_links = {}
-    for sender in VEHICLES:
-        for receiver in VEHICLES:
-            if sender == receiver:
-                continue
-            est = offset_sender_to_receiver(logs, sender, receiver)
-            if est is not None:
-                clock_links[f"{sender}->{receiver}"] = est
+    if mode == "full":
+        temporal = align_vehicle_windows_to_v002(logs)
+        clock_links = {}
+        for sender in VEHICLES:
+            for receiver in VEHICLES:
+                if sender == receiver:
+                    continue
+                est = offset_sender_to_receiver(logs, sender, receiver)
+                if est is not None:
+                    clock_links[f"{sender}->{receiver}"] = est
 
-    links = [
-        ("V001", "V002"),
-        ("V001", "V003"),
-        ("V002", "V001"),
-        ("V002", "V003"),
-        ("V003", "V001"),
-        ("V003", "V002"),
-    ]
-    pdr_links = {f"{s}->{r}": compute_link_pdr(logs, s, r) for s, r in links}
-    pdr_windows = {f"{s}->{r}": compute_pdr_windows(logs, s, r) for s, r in links}
-    latency_by_link = {f"{s}->{r}": compute_latency_by_link(logs, s, r) for s, r in links}
-    burst_by_link = {f"{s}->{r}": compute_burst_by_link(logs, s, r) for s, r in links}
-    distance_by_link = {f"{s}->{r}": compute_distance_binned_loss(logs, s, r) for s, r in links}
+        links = [
+            ("V001", "V002"),
+            ("V001", "V003"),
+            ("V002", "V001"),
+            ("V002", "V003"),
+            ("V003", "V001"),
+            ("V003", "V002"),
+        ]
+        pdr_links = {f"{s}->{r}": compute_link_pdr(logs, s, r) for s, r in links}
+        pdr_windows = {f"{s}->{r}": compute_pdr_windows(logs, s, r) for s, r in links}
+        latency_by_link = {f"{s}->{r}": compute_latency_by_link(logs, s, r) for s, r in links}
+        burst_by_link = {f"{s}->{r}": compute_burst_by_link(logs, s, r) for s, r in links}
+        distance_by_link = {f"{s}->{r}": compute_distance_binned_loss(logs, s, r) for s, r in links}
 
-    per_vehicle_sensor = {v: compute_sensor_noise_for_vehicle(logs[v]["tx"]) for v in VEHICLES}
-    sensor_agg = aggregate_sensor_noise(per_vehicle_sensor)
+        per_vehicle_sensor = {v: compute_sensor_noise_for_vehicle(logs[v]["tx"]) for v in VEHICLES}
+        sensor_agg = aggregate_sensor_noise(per_vehicle_sensor)
 
-    # V002 reference point for local XY conversion.
-    v2_tx = logs["V002"]["tx"].data
-    valid_v2 = valid_gps(v2_tx["lat"], v2_tx["lon"])
-    if np.sum(valid_v2) == 0:
-        print("V002 has no valid GPS fixes; cannot build observation/trajectory geometry.", file=sys.stderr)
-        return 1
-    ref_lat = float(v2_tx["lat"][valid_v2][0])
-    ref_lon = float(v2_tx["lon"][valid_v2][0])
+        # V002 reference point for local XY conversion.
+        v2_tx = logs["V002"]["tx"].data
+        valid_v2 = valid_gps(v2_tx["lat"], v2_tx["lon"])
+        if np.sum(valid_v2) == 0:
+            print("V002 has no valid GPS fixes; cannot build observation/trajectory geometry.", file=sys.stderr)
+            return 1
+        ref_lat = float(v2_tx["lat"][valid_v2][0])
+        ref_lon = float(v2_tx["lon"][valid_v2][0])
 
-    events = detect_braking_events(logs["V001"]["tx"])
-    hard_event = events.get("hard_event")
-    hard_event_v002_window: Optional[Tuple[float, float]] = None
-    if hard_event is not None:
-        shift = float(temporal["offsets_to_v002_ms"].get("V001", 0.0))
-        hard_event_v002_window = (
-            hard_event["start_msg_ms"] + shift,
-            hard_event["end_msg_ms"] + shift,
+        events = detect_braking_events(logs["V001"]["tx"])
+        hard_event = events.get("hard_event")
+        hard_event_v002_window: Optional[Tuple[float, float]] = None
+        if hard_event is not None:
+            shift = float(temporal["offsets_to_v002_ms"].get("V001", 0.0))
+            hard_event_v002_window = (
+                hard_event["start_msg_ms"] + shift,
+                hard_event["end_msg_ms"] + shift,
+            )
+
+        obs = build_observations_v002(logs, ref_lat, ref_lon)
+        obs_ranges = summarize_observation_ranges(obs)
+        zero_peer = compute_zero_peer_windows(obs)
+
+        repo_root = Path(__file__).resolve().parents[2]
+        model_path = args.model_path if args.model_path is not None else discover_default_model(repo_root)
+        inference = run_optional_model_inference(model_path, obs, hard_event_v002_window)
+
+        # Save NPZ for downstream offline work.
+        obs_npz_path = args.out_dir / "convoy_observations.npz"
+        np.savez_compressed(
+            obs_npz_path,
+            timestamps_local_ms=obs["timestamps_local_ms"],
+            ego=obs["ego"],
+            peers=obs["peers"],
+            peer_mask=obs["peer_mask"],
         )
 
-    obs = build_observations_v002(logs, ref_lat, ref_lon)
-    obs_ranges = summarize_observation_ranges(obs)
-    zero_peer = compute_zero_peer_windows(obs)
+        # Extract trajectories and formation stats.
+        traj_outputs = extract_trajectories(logs, args.out_dir, ref_lat, ref_lon)
+        formation = formation_analysis(logs, temporal["offsets_to_v002_ms"])
 
-    repo_root = Path(__file__).resolve().parents[2]
-    model_path = args.model_path if args.model_path is not None else discover_default_model(repo_root)
-    inference = run_optional_model_inference(model_path, obs, hard_event_v002_window)
+        figures: List[str] = []
+        if not args.no_plots and plt is not None:
+            figures = plot_figures(
+                out_dir=args.out_dir,
+                logs=logs,
+                pdr_windows=pdr_windows,
+                latency_by_link=latency_by_link,
+                formation=formation,
+                sensor_agg=sensor_agg,
+                obs=obs,
+                hard_event=hard_event,
+                offsets_to_v002=temporal["offsets_to_v002_ms"],
+            )
 
-    # Save NPZ for downstream offline work.
-    obs_npz_path = args.out_dir / "convoy_observations.npz"
-    np.savez_compressed(
-        obs_npz_path,
-        timestamps_local_ms=obs["timestamps_local_ms"],
-        ego=obs["ego"],
-        peers=obs["peers"],
-        peer_mask=obs["peer_mask"],
-    )
-
-    # Extract trajectories and formation stats.
-    traj_outputs = extract_trajectories(logs, args.out_dir, ref_lat, ref_lon)
-    formation = formation_analysis(logs, temporal["offsets_to_v002_ms"])
-
-    figures: List[str] = []
-    if not args.no_plots and plt is not None:
-        figures = plot_figures(
-            out_dir=args.out_dir,
-            logs=logs,
-            pdr_windows=pdr_windows,
+        emulator_params = build_emulator_params_from_convoy(
+            pdr_links=pdr_links,
             latency_by_link=latency_by_link,
-            formation=formation,
+            burst_by_link=burst_by_link,
+            distance_loss_by_link=distance_by_link,
             sensor_agg=sensor_agg,
-            obs=obs,
-            hard_event=hard_event,
-            offsets_to_v002=temporal["offsets_to_v002_ms"],
+        )
+    else:
+        ego_vehicle = "V001"
+        temporal = align_vehicle_windows_simple(logs[ego_vehicle]["tx"], logs[ego_vehicle]["rx"])
+        clock_links = {}
+        pdr_links = compute_link_stats_from_ego_rx(logs, ego_vehicle=ego_vehicle)
+        pdr_windows = {}
+        latency_by_link = compute_latency_from_ego_rx(logs, ego_vehicle=ego_vehicle)
+        burst_by_link = compute_burst_from_ego_rx(logs, ego_vehicle=ego_vehicle)
+        distance_by_link = {}
+
+        per_vehicle_sensor = {ego_vehicle: compute_sensor_noise_for_vehicle(logs[ego_vehicle]["tx"])}
+        sensor_agg = aggregate_sensor_noise(per_vehicle_sensor)
+
+        ego_tx = logs[ego_vehicle]["tx"].data
+        valid_ego = valid_gps(ego_tx["lat"], ego_tx["lon"])
+        if np.sum(valid_ego) > 0:
+            ref_lat = float(ego_tx["lat"][valid_ego][0])
+            ref_lon = float(ego_tx["lon"][valid_ego][0])
+        else:
+            ego_rx = logs[ego_vehicle]["rx"].data
+            valid_rx = valid_gps(ego_rx["lat"], ego_rx["lon"])
+            if np.sum(valid_rx) > 0:
+                ref_lat = float(ego_rx["lat"][valid_rx][0])
+                ref_lon = float(ego_rx["lon"][valid_rx][0])
+            else:
+                # Keep analysis running (file quality/link health), but geometry is degraded.
+                ref_lat = 0.0
+                ref_lon = 0.0
+
+        # In ego-only mode, braking is measured on ego response.
+        events = detect_braking_events(logs[ego_vehicle]["tx"])
+        hard_event = events.get("hard_event")
+
+        obs = build_observations_from_ego(logs, ego_vehicle=ego_vehicle, ref_lat=ref_lat, ref_lon=ref_lon)
+        obs_ranges = summarize_observation_ranges(obs)
+        zero_peer = compute_zero_peer_windows(obs)
+
+        inference = {
+            "model_path": None,
+            "loaded": False,
+            "reason": "skipped_in_ego_only_mode",
+        }
+
+        obs_npz_path = args.out_dir / "convoy_observations.npz"
+        np.savez_compressed(
+            obs_npz_path,
+            timestamps_local_ms=obs["timestamps_local_ms"],
+            ego=obs["ego"],
+            peers=obs["peers"],
+            peer_mask=obs["peer_mask"],
         )
 
-    emulator_params = build_emulator_params_from_convoy(
-        pdr_links=pdr_links,
-        latency_by_link=latency_by_link,
-        burst_by_link=burst_by_link,
-        distance_loss_by_link=distance_by_link,
-        sensor_agg=sensor_agg,
-    )
+        traj_outputs = extract_trajectories(logs, args.out_dir, ref_lat, ref_lon)
+        formation = formation_analysis_ego(logs, ego_vehicle=ego_vehicle)
+        figures = []
+
+        emulator_params = build_emulator_params_from_convoy(
+            pdr_links=pdr_links,
+            latency_by_link=latency_by_link,
+            burst_by_link=burst_by_link,
+            distance_loss_by_link=distance_by_link,
+            sensor_agg=sensor_agg,
+        )
+        emulator_params["notes"] = (
+            "Generated in ego-only mode; packet-loss/burst metrics are estimated from V001 RX spacing."
+        )
 
     data_quality_summary = {
+        "mode": mode,
         "input_root": str(args.input_root),
         "files": file_summaries,
         "temporal_alignment": temporal,
@@ -1920,15 +2439,20 @@ def main() -> int:
             "light_braking_events": 2,
             "hard_braking_events": 1,
             "final_stationary_window_expected_s": 60,
-            "ego_vehicle": "V002",
+            "ego_vehicle": "V002" if mode == "full" else "V001",
         },
         "detected": events,
-        "mapped_to_v002_clock": {
-            "hard_event_v002_ms": list(hard_event_v002_window) if hard_event_v002_window is not None else None,
-        },
+        "mapped_to_v002_clock": (
+            {
+                "hard_event_v002_ms": list(hard_event_v002_window) if hard_event_v002_window is not None else None,
+            }
+            if mode == "full"
+            else None
+        ),
     }
 
     analysis_summary = {
+        "mode": mode,
         "pdr_by_link": pdr_links,
         "latency_by_link": {
             k: {
@@ -1961,24 +2485,40 @@ def main() -> int:
     write_json(args.out_dir / "convoy_emulator_params.json", emulator_params)
     write_json(args.out_dir / "analysis_summary.json", analysis_summary)
 
-    markdown_report(
-        out_path=args.out_dir / "convoy_analysis_report.md",
-        data_quality=data_quality_summary,
-        temporal=temporal,
-        pdr_links=pdr_links,
-        latency_by_link=latency_by_link,
-        burst_by_link=burst_by_link,
-        distance_by_link=distance_by_link,
-        events=events,
-        obs_ranges=obs_ranges,
-        zero_peer_windows=zero_peer,
-        inference=inference,
-        formation=formation,
-        trajectory_outputs=traj_outputs,
-        figures=figures,
-    )
+    if mode == "full":
+        markdown_report(
+            out_path=args.out_dir / "convoy_analysis_report.md",
+            data_quality=data_quality_summary,
+            temporal=temporal,
+            pdr_links=pdr_links,
+            latency_by_link=latency_by_link,
+            burst_by_link=burst_by_link,
+            distance_by_link=distance_by_link,
+            events=events,
+            obs_ranges=obs_ranges,
+            zero_peer_windows=zero_peer,
+            inference=inference,
+            formation=formation,
+            trajectory_outputs=traj_outputs,
+            figures=figures,
+        )
+    else:
+        markdown_report_ego(
+            out_path=args.out_dir / "convoy_analysis_report.md",
+            data_quality=data_quality_summary,
+            temporal=temporal,
+            pdr_links=pdr_links,
+            latency_by_link=latency_by_link,
+            burst_by_link=burst_by_link,
+            events=events,
+            obs_ranges=obs_ranges,
+            zero_peer_windows=zero_peer,
+            formation=formation,
+            trajectory_outputs=traj_outputs,
+        )
 
     print("Convoy analysis complete")
+    print(f"  Mode: {mode}")
     print(f"  Output directory: {args.out_dir}")
     print(f"  Report: {args.out_dir / 'convoy_analysis_report.md'}")
     print(f"  Emulator params: {args.out_dir / 'convoy_emulator_params.json'}")
