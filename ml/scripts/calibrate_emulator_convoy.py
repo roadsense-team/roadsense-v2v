@@ -17,6 +17,7 @@ Date: February 24, 2026
 """
 
 import argparse
+import csv
 import json
 import math
 import sys
@@ -59,23 +60,51 @@ COLUMNS = [
 ]
 FLOAT_COLS = COLUMNS[3:]  # everything after vehicle_id
 INT_COLS = ["timestamp_local_ms", "msg_timestamp"]
+SENDER_COLUMN_CANDIDATES = ("from_vehicle_id", "vehicle_id")
+MIN_EXPECTED_COLUMNS = 16
 
 
 def parse_csv(path: Path) -> Dict[str, np.ndarray]:
     """Parse a convoy CSV into dict of numpy arrays."""
+    def _empty() -> Dict[str, np.ndarray]:
+        out = {}
+        for c in INT_COLS:
+            out[c] = np.array([], dtype=np.int64)
+        out["vehicle_id"] = np.array([], dtype=object)
+        for c in FLOAT_COLS:
+            out[c] = np.array([], dtype=np.float64)
+        return out
+
     rows = {c: [] for c in COLUMNS}
-    with open(path) as f:
-        header = f.readline()  # skip header
-        for line in f:
-            parts = line.strip().split(",")
-            if len(parts) != 16:
+    with open(path, newline="") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        if header is None:
+            return _empty()
+
+        if len(header) < MIN_EXPECTED_COLUMNS:
+            return _empty()
+
+        header_map = {name.strip(): idx for idx, name in enumerate(header)}
+        sender_col = next((name for name in SENDER_COLUMN_CANDIDATES if name in header_map), None)
+        if sender_col is None:
+            return _empty()
+
+        required = ("timestamp_local_ms", "msg_timestamp", "lat", "lon", "speed", "heading",
+                    "accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z",
+                    "mag_x", "mag_y", "mag_z")
+        if any(col not in header_map for col in required):
+            return _empty()
+
+        for parts in reader:
+            if len(parts) != len(header):
                 continue
             try:
-                rows["timestamp_local_ms"].append(int(float(parts[0])))
-                rows["msg_timestamp"].append(int(float(parts[1])))
-                rows["vehicle_id"].append(parts[2].strip())
-                for i, col in enumerate(FLOAT_COLS):
-                    rows[col].append(float(parts[i + 3]))
+                rows["timestamp_local_ms"].append(int(float(parts[header_map["timestamp_local_ms"]])))
+                rows["msg_timestamp"].append(int(float(parts[header_map["msg_timestamp"]])))
+                rows["vehicle_id"].append(parts[header_map[sender_col]].strip())
+                for col in FLOAT_COLS:
+                    rows[col].append(float(parts[header_map[col]]))
             except (ValueError, IndexError):
                 continue
 

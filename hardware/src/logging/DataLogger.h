@@ -20,9 +20,11 @@
  * File Format (Mode 1 - Network Characterization):
  * -------------------------------------------------
  * TX Log: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,
- *         accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z
+ *         accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z,
+ *         hop_count,source_mac
  * RX Log: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,
- *         accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z
+ *         accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z,
+ *         hop_count,source_mac
  *
  * File Format (Mode 2 - Training Data):
  * --------------------------------------

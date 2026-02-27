@@ -7,6 +7,16 @@
 #include "../utils/Logger.h"
 #include <SPI.h>
 
+namespace {
+void formatMacAddress(const uint8_t mac[6], char* out, size_t outSize) {
+    if (out == nullptr || outSize == 0) {
+        return;
+    }
+    snprintf(out, outSize, "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+}
+
 // Constructor
 DataLogger::DataLogger()
     : m_mode(MODE_NETWORK_CHARACTERIZATION),  // Default to Mode 1 (characterization first!)
@@ -352,8 +362,11 @@ size_t DataLogger::formatCharacterizationTxRow(char* outBuffer, size_t bufferSiz
         return 0;
     }
 
+    char sourceMac[MAC_STRING_LENGTH] = {0};
+    formatMacAddress(msg.sourceMAC, sourceMac, sizeof(sourceMac));
+
     int written = snprintf(outBuffer, bufferSize,
-        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f\n",
+        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f,%u,%s\n",
         static_cast<unsigned long>(localTimestampMs),
         static_cast<unsigned long>(msg.timestamp),
         msg.vehicleId,
@@ -369,7 +382,9 @@ size_t DataLogger::formatCharacterizationTxRow(char* outBuffer, size_t bufferSiz
         msg.sensors.gyro[2],
         msg.sensors.mag[0],
         msg.sensors.mag[1],
-        msg.sensors.mag[2]
+        msg.sensors.mag[2],
+        msg.hopCount,
+        sourceMac
     );
 
     if (written < 0) {
@@ -390,8 +405,11 @@ size_t DataLogger::formatCharacterizationRxRow(char* outBuffer, size_t bufferSiz
         return 0;
     }
 
+    char sourceMac[MAC_STRING_LENGTH] = {0};
+    formatMacAddress(msg.sourceMAC, sourceMac, sizeof(sourceMac));
+
     int written = snprintf(outBuffer, bufferSize,
-        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f\n",
+        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f,%u,%s\n",
         static_cast<unsigned long>(localTimestampMs),
         static_cast<unsigned long>(msg.timestamp),
         msg.vehicleId,
@@ -407,7 +425,9 @@ size_t DataLogger::formatCharacterizationRxRow(char* outBuffer, size_t bufferSiz
         msg.sensors.gyro[2],
         msg.sensors.mag[0],
         msg.sensors.mag[1],
-        msg.sensors.mag[2]
+        msg.sensors.mag[2],
+        msg.hopCount,
+        sourceMac
     );
 
     if (written < 0) {
@@ -605,7 +625,7 @@ bool DataLogger::createCharacterizationFiles(const char* vehicleId) {
 
 // Write TX log header
 bool DataLogger::writeTxHeader() {
-    const char* header = "timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z\n";
+    const char* header = "timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z,hop_count,source_mac\n";
     size_t len = strlen(header);
     size_t written = m_txLogFile.write(header, len);
 
@@ -620,7 +640,7 @@ bool DataLogger::writeTxHeader() {
 
 // Write RX log header
 bool DataLogger::writeRxHeader() {
-    const char* header = "timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z\n";
+    const char* header = "timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z,hop_count,source_mac\n";
     size_t len = strlen(header);
     size_t written = m_rxLogFile.write(header, len);
 
