@@ -1467,27 +1467,78 @@ def extract_trajectories(
     traj_dir.mkdir(parents=True, exist_ok=True)
     out: Dict[str, Dict] = {}
 
-    for vehicle in sorted(logs.keys()):
-        tx = logs[vehicle]["tx"].data
-        t = tx["timestamp_local_ms"].astype(np.int64)
+    def _collapse_duplicate_timestamps(
+        t_ms: np.ndarray,
+        lat: np.ndarray,
+        lon: np.ndarray,
+        speed: np.ndarray,
+        heading: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        if t_ms.size <= 1:
+            return t_ms, lat, lon, speed, heading
+
+        unique_t, inverse = np.unique(t_ms, return_inverse=True)
+        if unique_t.size == t_ms.size:
+            return t_ms, lat, lon, speed, heading
+
+        counts = np.bincount(inverse)
+
+        def _mean_by_time(values: np.ndarray) -> np.ndarray:
+            return np.bincount(inverse, weights=values.astype(float)) / counts
+
+        return (
+            unique_t.astype(np.int64),
+            _mean_by_time(lat),
+            _mean_by_time(lon),
+            _mean_by_time(speed),
+            _mean_by_time(heading),
+        )
+
+    def _write_trajectory_csv(
+        vehicle_id: str,
+        t_ms: np.ndarray,
+        lat: np.ndarray,
+        lon: np.ndarray,
+        speed: np.ndarray,
+        heading: np.ndarray,
+    ) -> Optional[Dict[str, float]]:
+        if t_ms.size < 2:
+            return None
+
+        t, lat_v, lon_v, speed_v, heading_v = _collapse_duplicate_timestamps(
+            t_ms.astype(np.int64),
+            lat.astype(float),
+            lon.astype(float),
+            speed.astype(float),
+            heading.astype(float),
+        )
         if t.size < 2:
-            continue
+            return None
+
+        gps_ok = valid_gps(lat_v, lon_v)
+        if np.sum(gps_ok) < 2:
+            return None
+
+        if t.size < 2:
+            return None
         t0 = int(t.min())
         t1 = int(t.max())
         t_uniform = np.arange(t0, t1 + 1, 100, dtype=np.int64)
+        if t_uniform.size < 2:
+            return None
 
-        lat = np.interp(t_uniform, t, tx["lat"])
-        lon = np.interp(t_uniform, t, tx["lon"])
-        speed = np.interp(t_uniform, t, tx["speed"])
-        heading = np.interp(t_uniform, t, tx["heading"])
+        lat_i = np.interp(t_uniform, t[gps_ok], lat_v[gps_ok])
+        lon_i = np.interp(t_uniform, t[gps_ok], lon_v[gps_ok])
+        speed_i = np.interp(t_uniform, t, speed_v)
+        heading_i = np.interp(t_uniform, t, heading_v)
 
-        lat_s = smooth_series(lat)
-        lon_s = smooth_series(lon)
-        speed_s = moving_average(speed, 9)
-        heading_s = moving_average(heading, 9)
+        lat_s = smooth_series(lat_i)
+        lon_s = smooth_series(lon_i)
+        speed_s = moving_average(speed_i, 9)
+        heading_s = moving_average(heading_i, 9)
 
         x, y = latlon_to_xy(lat_s, lon_s, ref_lat, ref_lon)
-        path = traj_dir / f"{vehicle}_trajectory.csv"
+        path = traj_dir / f"{vehicle_id}_trajectory.csv"
         with path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(["t_local_ms", "t_rel_s", "lat", "lon", "x_m", "y_m", "speed_ms", "heading_deg"])
@@ -1505,12 +1556,49 @@ def extract_trajectories(
                     ]
                 )
 
-        out[vehicle] = {
+        return {
             "csv": str(path),
             "samples": int(t_uniform.size),
             "duration_s": float((t1 - t0) / 1000.0),
             "avg_speed_ms": float(np.mean(speed_s)),
         }
+
+    for vehicle in sorted(logs.keys()):
+        tx = logs[vehicle]["tx"].data
+        info = _write_trajectory_csv(
+            vehicle_id=vehicle,
+            t_ms=tx["timestamp_local_ms"],
+            lat=tx["lat"],
+            lon=tx["lon"],
+            speed=tx["speed"],
+            heading=tx["heading"],
+        )
+        if info is not None:
+            out[vehicle] = info
+
+    # Ego-only mode: extract peer trajectories from ego RX packets.
+    if set(logs.keys()) == {"V001"}:
+        rx = logs["V001"]["rx"].data
+        sender_ids = sorted({str(v) for v in rx["sender_id"].tolist() if str(v)})
+        sender_ids = [sid for sid in sender_ids if sid and sid != "V001" and sid not in out]
+
+        for sender in sender_ids:
+            m = rx["sender_id"] == sender
+            if np.sum(m) < 2:
+                continue
+            order = np.argsort(rx["timestamp_local_ms"][m])
+            info = _write_trajectory_csv(
+                vehicle_id=sender,
+                t_ms=rx["timestamp_local_ms"][m][order],
+                lat=rx["lat"][m][order],
+                lon=rx["lon"][m][order],
+                speed=rx["speed"][m][order],
+                heading=rx["heading"][m][order],
+            )
+            if info is not None:
+                info["source"] = "rx_from_V001"
+                out[sender] = info
+
     return out
 
 
@@ -2236,6 +2324,13 @@ def main() -> int:
         action="store_true",
         help="Skip figure generation.",
     )
+    parser.add_argument(
+        "--forward-axis",
+        choices=["x", "y"],
+        default="x",
+        help="Which accelerometer axis is the vehicle forward/braking axis. "
+        "Use 'y' if the board is mounted with Y pointing forward.",
+    )
     args = parser.parse_args()
 
     if not args.input_root.exists():
@@ -2260,6 +2355,13 @@ def main() -> int:
     except Exception as exc:
         print(f"Failed loading convoy CSVs: {exc}", file=sys.stderr)
         return 1
+
+    # Remap accelerometer axes so accel_x always = forward/braking axis.
+    if args.forward_axis == "y":
+        for vehicle_logs in logs.values():
+            for parsed in vehicle_logs.values():
+                d = parsed.data
+                d["accel_x"], d["accel_y"] = d["accel_y"].copy(), d["accel_x"].copy()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 

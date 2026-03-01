@@ -1,0 +1,806 @@
+{
+  "detected": {
+    "all_candidates": [
+      {
+        "duration_s": 10.0,
+        "end_msg_ms": 73348,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -1.221881188118812,
+        "min_accel_x_ms2": -1.4120000000000001,
+        "speed_drop_ms": -1.13,
+        "start_msg_ms": 63348
+      },
+      {
+        "duration_s": 1.2,
+        "end_msg_ms": 766824,
+        "mean_accel_x_ms2": -0.958529411764706,
+        "min_accel_x_ms2": -1.818,
+        "speed_drop_ms": 0.8499999999999996,
+        "start_msg_ms": 765624
+      },
+      {
+        "duration_s": 0.5,
+        "end_msg_ms": 94248,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -1.018857142857143,
+        "min_accel_x_ms2": -2.01,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 93748
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 98648,
+        "mean_accel_x_ms2": -1.0056,
+        "min_accel_x_ms2": -1.4580000000000002,
+        "speed_drop_ms": -1.1099999999999994,
+        "start_msg_ms": 1021496
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 1037496,
+        "mean_accel_x_ms2": -0.4109999999999999,
+        "min_accel_x_ms2": -0.9339999999999999,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1037396
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 117251,
+        "mean_accel_x_ms2": -0.674,
+        "min_accel_x_ms2": -0.9500000000000001,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 117151
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 118551,
+        "mean_accel_x_ms2": -0.7410000000000001,
+        "min_accel_x_ms2": -1.28,
+        "speed_drop_ms": -3.3,
+        "start_msg_ms": 1040896
+      },
+      {
+        "duration_s": 688.473,
+        "end_msg_ms": 807424,
+        "mean_accel_x_ms2": -1.4667999999999999,
+        "min_accel_x_ms2": -1.762,
+        "speed_drop_ms": -0.1299999999999999,
+        "start_msg_ms": 118951
+      },
+      {
+        "duration_s": 0.4,
+        "end_msg_ms": 125951,
+        "mean_accel_x_ms2": -1.0784285714285715,
+        "min_accel_x_ms2": -2.0060000000000002,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 125551
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 814924,
+        "mean_accel_x_ms2": -0.8538,
+        "min_accel_x_ms2": -1.5100000000000002,
+        "speed_drop_ms": 1.6900000000000004,
+        "start_msg_ms": 1049496
+      },
+      {
+        "duration_s": 688.773,
+        "end_msg_ms": 817324,
+        "mean_accel_x_ms2": -0.7301818181818182,
+        "min_accel_x_ms2": -1.948,
+        "speed_drop_ms": 6.140000000000001,
+        "start_msg_ms": 128551
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 131451,
+        "mean_accel_x_ms2": -0.7588000000000001,
+        "min_accel_x_ms2": -0.9200000000000002,
+        "speed_drop_ms": 0.41999999999999993,
+        "start_msg_ms": 819524
+      },
+      {
+        "duration_s": 688.273,
+        "end_msg_ms": 828124,
+        "mean_accel_x_ms2": -0.8793333333333333,
+        "min_accel_x_ms2": -1.168,
+        "speed_drop_ms": 2.820000000000001,
+        "start_msg_ms": 139851
+      },
+      {
+        "duration_s": 0.6,
+        "end_msg_ms": 142051,
+        "mean_accel_x_ms2": -1.0385000000000002,
+        "min_accel_x_ms2": -1.7320000000000002,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 141451
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 146751,
+        "mean_accel_x_ms2": -0.7086666666666668,
+        "min_accel_x_ms2": -0.9000000000000001,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 146651
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 153451,
+        "mean_accel_x_ms2": -0.75,
+        "min_accel_x_ms2": -1.098,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 153351
+      },
+      {
+        "duration_s": 1.1,
+        "end_msg_ms": 159251,
+        "mean_accel_x_ms2": -0.7284444444444446,
+        "min_accel_x_ms2": -1.3360000000000003,
+        "speed_drop_ms": 1.92,
+        "start_msg_ms": 158151
+      },
+      {
+        "duration_s": 924.345,
+        "end_msg_ms": 1096396,
+        "mean_accel_x_ms2": -0.8943684210526315,
+        "min_accel_x_ms2": -1.744,
+        "speed_drop_ms": 5.47,
+        "start_msg_ms": 172051
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 1097196,
+        "mean_accel_x_ms2": -0.6734285714285715,
+        "min_accel_x_ms2": -1.092,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1096996
+      },
+      {
+        "duration_s": 0.7,
+        "end_msg_ms": 872824,
+        "mean_accel_x_ms2": -1.214636363636364,
+        "min_accel_x_ms2": -1.846,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 872124
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 873824,
+        "mean_accel_x_ms2": -0.635,
+        "min_accel_x_ms2": -1.004,
+        "speed_drop_ms": -1.0499999999999998,
+        "start_msg_ms": 1108596
+      },
+      {
+        "duration_s": 688.473,
+        "end_msg_ms": 877524,
+        "mean_accel_x_ms2": -1.1355000000000004,
+        "min_accel_x_ms2": -1.3820000000000003,
+        "speed_drop_ms": -2.08,
+        "start_msg_ms": 189051
+      },
+      {
+        "duration_s": 1.1,
+        "end_msg_ms": 1114096,
+        "mean_accel_x_ms2": -0.4875714285714287,
+        "min_accel_x_ms2": -0.9820000000000002,
+        "speed_drop_ms": -0.9100000000000001,
+        "start_msg_ms": 1112996
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 191451,
+        "mean_accel_x_ms2": -1.6160000000000003,
+        "min_accel_x_ms2": -2.274,
+        "speed_drop_ms": 2.5799999999999983,
+        "start_msg_ms": 879524
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 191951,
+        "mean_accel_x_ms2": -0.96225,
+        "min_accel_x_ms2": -1.5,
+        "speed_drop_ms": 0.879999999999999,
+        "start_msg_ms": 1114796
+      },
+      {
+        "duration_s": 688.273,
+        "end_msg_ms": 881524,
+        "mean_accel_x_ms2": -0.5413333333333332,
+        "min_accel_x_ms2": -1.044,
+        "speed_drop_ms": 4.64,
+        "start_msg_ms": 193251
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 882824,
+        "mean_accel_x_ms2": -0.555,
+        "min_accel_x_ms2": -1.082,
+        "speed_drop_ms": 3.5700000000000003,
+        "start_msg_ms": 1117596
+      },
+      {
+        "duration_s": 235.772,
+        "end_msg_ms": 1119296,
+        "mean_accel_x_ms2": -0.6922962962962963,
+        "min_accel_x_ms2": -1.504,
+        "speed_drop_ms": 1.67,
+        "start_msg_ms": 883524
+      },
+      {
+        "duration_s": 688.273,
+        "end_msg_ms": 885624,
+        "mean_accel_x_ms2": -0.7360000000000001,
+        "min_accel_x_ms2": -1.078,
+        "speed_drop_ms": -4.2700000000000005,
+        "start_msg_ms": 197351
+      },
+      {
+        "duration_s": 923.745,
+        "end_msg_ms": 1126096,
+        "mean_accel_x_ms2": -0.5517000000000002,
+        "min_accel_x_ms2": -1.79,
+        "speed_drop_ms": -3.0200000000000005,
+        "start_msg_ms": 202351
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 897024,
+        "mean_accel_x_ms2": -1.0590843373493977,
+        "min_accel_x_ms2": -2.526,
+        "speed_drop_ms": 1.3999999999999995,
+        "start_msg_ms": 1128896
+      },
+      {
+        "duration_s": 0.9,
+        "end_msg_ms": 1135596,
+        "mean_accel_x_ms2": -0.503851851851852,
+        "min_accel_x_ms2": -1.308,
+        "speed_drop_ms": -0.5499999999999998,
+        "start_msg_ms": 1134696
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 1136096,
+        "mean_accel_x_ms2": -0.8183333333333334,
+        "min_accel_x_ms2": -0.866,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1135896
+      },
+      {
+        "duration_s": 0.8,
+        "end_msg_ms": 1139596,
+        "mean_accel_x_ms2": -0.9164166666666667,
+        "min_accel_x_ms2": -1.7480000000000002,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1138796
+      },
+      {
+        "duration_s": 1.2,
+        "end_msg_ms": 1141096,
+        "mean_accel_x_ms2": -0.6690270270270272,
+        "min_accel_x_ms2": -1.75,
+        "speed_drop_ms": 0.4400000000000004,
+        "start_msg_ms": 1139896
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 907524,
+        "mean_accel_x_ms2": -1.7286666666666666,
+        "min_accel_x_ms2": -2.452,
+        "speed_drop_ms": 1.51,
+        "start_msg_ms": 1141996
+      },
+      {
+        "duration_s": 0.3,
+        "end_msg_ms": 1144696,
+        "mean_accel_x_ms2": -0.5094000000000001,
+        "min_accel_x_ms2": -1.05,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1144396
+      },
+      {
+        "duration_s": 0.4,
+        "end_msg_ms": 224951,
+        "mean_accel_x_ms2": -0.6244444444444444,
+        "min_accel_x_ms2": -1.004,
+        "speed_drop_ms": -2.43,
+        "start_msg_ms": 224551
+      },
+      {
+        "duration_s": 0.4,
+        "end_msg_ms": 238751,
+        "mean_accel_x_ms2": -1.1676,
+        "min_accel_x_ms2": -1.5300000000000002,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 238351
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 1169796,
+        "mean_accel_x_ms2": -0.4668571428571428,
+        "min_accel_x_ms2": -1.472,
+        "speed_drop_ms": -0.05000000000000071,
+        "start_msg_ms": 1169596
+      },
+      {
+        "duration_s": 0.5,
+        "end_msg_ms": 1170896,
+        "mean_accel_x_ms2": -0.539529411764706,
+        "min_accel_x_ms2": -2.0660000000000003,
+        "speed_drop_ms": 1.4400000000000013,
+        "start_msg_ms": 1170396
+      },
+      {
+        "duration_s": 692.173,
+        "end_msg_ms": 940424,
+        "mean_accel_x_ms2": -1.1017659574468086,
+        "min_accel_x_ms2": -4.5840000000000005,
+        "speed_drop_ms": 9.91,
+        "start_msg_ms": 248251
+      },
+      {
+        "duration_s": 0.4,
+        "end_msg_ms": 268751,
+        "mean_accel_x_ms2": -0.8979999999999999,
+        "min_accel_x_ms2": -1.1119999999999999,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 268351
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 1037724,
+        "mean_accel_x_ms2": -0.6007058823529414,
+        "min_accel_x_ms2": -1.064,
+        "speed_drop_ms": 0.7100000000000009,
+        "start_msg_ms": 1271896
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 388837,
+        "mean_accel_x_ms2": -0.7908000000000002,
+        "min_accel_x_ms2": -1.044,
+        "speed_drop_ms": -1.209999999999999,
+        "start_msg_ms": 1076824
+      },
+      {
+        "duration_s": 235.472,
+        "end_msg_ms": 1382896,
+        "mean_accel_x_ms2": -0.7954117647058825,
+        "min_accel_x_ms2": -1.6740000000000002,
+        "speed_drop_ms": -0.47000000000000064,
+        "start_msg_ms": 1147424
+      },
+      {
+        "duration_s": 0.4,
+        "end_msg_ms": 1386596,
+        "mean_accel_x_ms2": -0.602,
+        "min_accel_x_ms2": -1.142,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1386196
+      },
+      {
+        "duration_s": 923.256,
+        "end_msg_ms": 1387196,
+        "mean_accel_x_ms2": -0.7585714285714287,
+        "min_accel_x_ms2": -1.04,
+        "speed_drop_ms": 2.3599999999999994,
+        "start_msg_ms": 463940
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 1165724,
+        "mean_accel_x_ms2": -0.6481818181818182,
+        "min_accel_x_ms2": -1.6839999999999997,
+        "speed_drop_ms": -0.08000000000000007,
+        "start_msg_ms": 1399396
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 1403496,
+        "mean_accel_x_ms2": -0.59025,
+        "min_accel_x_ms2": -0.8620000000000001,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1403296
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 1410996,
+        "mean_accel_x_ms2": -0.36485714285714277,
+        "min_accel_x_ms2": -0.98,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1410796
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 1177024,
+        "mean_accel_x_ms2": -0.46883333333333327,
+        "min_accel_x_ms2": -1.1260000000000001,
+        "speed_drop_ms": 1.7300000000000004,
+        "start_msg_ms": 1411496
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 489941,
+        "mean_accel_x_ms2": -0.8533684210526316,
+        "min_accel_x_ms2": -1.6540000000000001,
+        "speed_drop_ms": -0.1399999999999988,
+        "start_msg_ms": 1412296
+      },
+      {
+        "duration_s": 0.3,
+        "end_msg_ms": 1414396,
+        "mean_accel_x_ms2": -0.3892000000000001,
+        "min_accel_x_ms2": -1.0100000000000002,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1414096
+      },
+      {
+        "duration_s": 235.372,
+        "end_msg_ms": 1415096,
+        "mean_accel_x_ms2": -0.5040000000000001,
+        "min_accel_x_ms2": -1.1720000000000002,
+        "speed_drop_ms": -1.0,
+        "start_msg_ms": 1179724
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 493041,
+        "mean_accel_x_ms2": -0.24154545454545454,
+        "min_accel_x_ms2": -1.0379999999999998,
+        "speed_drop_ms": 0.47000000000000064,
+        "start_msg_ms": 1415396
+      },
+      {
+        "duration_s": 924.655,
+        "end_msg_ms": 1417996,
+        "mean_accel_x_ms2": -0.3891020408163266,
+        "min_accel_x_ms2": -1.2660000000000002,
+        "speed_drop_ms": 1.0600000000000005,
+        "start_msg_ms": 493341
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 511541,
+        "mean_accel_x_ms2": -1.0340000000000003,
+        "min_accel_x_ms2": -1.5780000000000003,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 511441
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 512041,
+        "mean_accel_x_ms2": -0.6315000000000001,
+        "min_accel_x_ms2": -0.8520000000000001,
+        "speed_drop_ms": -0.41000000000000014,
+        "start_msg_ms": 1434996
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 1200624,
+        "mean_accel_x_ms2": -0.805,
+        "min_accel_x_ms2": -0.8280000000000001,
+        "speed_drop_ms": 0.27999999999999936,
+        "start_msg_ms": 1435396
+      },
+      {
+        "duration_s": 1.0,
+        "end_msg_ms": 1441896,
+        "mean_accel_x_ms2": -0.505655172413793,
+        "min_accel_x_ms2": -1.38,
+        "speed_drop_ms": 0.5499999999999989,
+        "start_msg_ms": 1440896
+      },
+      {
+        "duration_s": 1.4,
+        "end_msg_ms": 1443696,
+        "mean_accel_x_ms2": -0.5644736842105262,
+        "min_accel_x_ms2": -1.2439999999999998,
+        "speed_drop_ms": 0.6300000000000008,
+        "start_msg_ms": 1442296
+      },
+      {
+        "duration_s": 688.283,
+        "end_msg_ms": 1209324,
+        "mean_accel_x_ms2": -0.56,
+        "min_accel_x_ms2": -0.8720000000000001,
+        "speed_drop_ms": 0.47000000000000064,
+        "start_msg_ms": 521041
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 1446796,
+        "mean_accel_x_ms2": -0.45500000000000007,
+        "min_accel_x_ms2": -0.922,
+        "speed_drop_ms": 0.379999999999999,
+        "start_msg_ms": 1446696
+      },
+      {
+        "duration_s": 1.8,
+        "end_msg_ms": 1448996,
+        "mean_accel_x_ms2": -0.46822222222222226,
+        "min_accel_x_ms2": -1.1600000000000001,
+        "speed_drop_ms": 0.7900000000000009,
+        "start_msg_ms": 1447196
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 1450496,
+        "mean_accel_x_ms2": -0.32899999999999996,
+        "min_accel_x_ms2": -0.834,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1450396
+      },
+      {
+        "duration_s": 923.452,
+        "end_msg_ms": 1452096,
+        "mean_accel_x_ms2": -1.2752,
+        "min_accel_x_ms2": -1.434,
+        "speed_drop_ms": 1.4399999999999995,
+        "start_msg_ms": 528644
+      },
+      {
+        "duration_s": 0.3,
+        "end_msg_ms": 531044,
+        "mean_accel_x_ms2": -0.6520000000000001,
+        "min_accel_x_ms2": -1.0940000000000003,
+        "speed_drop_ms": -1.0900000000000007,
+        "start_msg_ms": 530744
+      },
+      {
+        "duration_s": 0.6,
+        "end_msg_ms": 539644,
+        "mean_accel_x_ms2": -1.0475999999999999,
+        "min_accel_x_ms2": -1.7760000000000002,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 539044
+      },
+      {
+        "duration_s": 923.252,
+        "end_msg_ms": 1463296,
+        "mean_accel_x_ms2": -0.73,
+        "min_accel_x_ms2": -1.08,
+        "speed_drop_ms": 1.0099999999999998,
+        "start_msg_ms": 540044
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 1463996,
+        "mean_accel_x_ms2": -0.8109999999999999,
+        "min_accel_x_ms2": -0.8939999999999999,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1463796
+      },
+      {
+        "duration_s": 688.28,
+        "end_msg_ms": 1239524,
+        "mean_accel_x_ms2": -0.5840000000000001,
+        "min_accel_x_ms2": -0.93,
+        "speed_drop_ms": 0.48999999999999844,
+        "start_msg_ms": 551244
+      },
+      {
+        "duration_s": 923.852,
+        "end_msg_ms": 1475396,
+        "mean_accel_x_ms2": -0.9024545454545456,
+        "min_accel_x_ms2": -1.1580000000000001,
+        "speed_drop_ms": 0.7799999999999994,
+        "start_msg_ms": 551544
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 553844,
+        "mean_accel_x_ms2": -0.44758620689655176,
+        "min_accel_x_ms2": -1.088,
+        "speed_drop_ms": 0.16999999999999993,
+        "start_msg_ms": 1475996
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 1243224,
+        "mean_accel_x_ms2": -0.8646666666666665,
+        "min_accel_x_ms2": -0.9199999999999999,
+        "speed_drop_ms": 0.2599999999999998,
+        "start_msg_ms": 1243024
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 1478596,
+        "mean_accel_x_ms2": -0.4857499999999999,
+        "min_accel_x_ms2": -0.9099999999999999,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1478396
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 556844,
+        "mean_accel_x_ms2": -1.1020000000000003,
+        "min_accel_x_ms2": -1.7580000000000005,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 556744
+      },
+      {
+        "duration_s": 0.5,
+        "end_msg_ms": 1480996,
+        "mean_accel_x_ms2": -0.31437500000000007,
+        "min_accel_x_ms2": -0.998,
+        "speed_drop_ms": 0.27999999999999936,
+        "start_msg_ms": 1480496
+      },
+      {
+        "duration_s": 0.6,
+        "end_msg_ms": 1481896,
+        "mean_accel_x_ms2": -0.3838947368421052,
+        "min_accel_x_ms2": -1.238,
+        "speed_drop_ms": 0.41999999999999993,
+        "start_msg_ms": 1481296
+      },
+      {
+        "duration_s": 1.9,
+        "end_msg_ms": 1484096,
+        "mean_accel_x_ms2": -0.394,
+        "min_accel_x_ms2": -1.624,
+        "speed_drop_ms": 1.3900000000000006,
+        "start_msg_ms": 1482196
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 1486796,
+        "mean_accel_x_ms2": -0.40700000000000003,
+        "min_accel_x_ms2": -0.8380000000000001,
+        "speed_drop_ms": 1.1600000000000001,
+        "start_msg_ms": 1486696
+      },
+      {
+        "duration_s": 0.8,
+        "end_msg_ms": 1487996,
+        "mean_accel_x_ms2": -0.4650399999999999,
+        "min_accel_x_ms2": -1.0959999999999999,
+        "speed_drop_ms": 1.17,
+        "start_msg_ms": 1487196
+      },
+      {
+        "duration_s": 689.289,
+        "end_msg_ms": 1268324,
+        "mean_accel_x_ms2": -0.8520000000000001,
+        "min_accel_x_ms2": -1.8579999999999999,
+        "speed_drop_ms": 1.3299999999999983,
+        "start_msg_ms": 579035
+      },
+      {
+        "duration_s": 688.389,
+        "end_msg_ms": 1274424,
+        "mean_accel_x_ms2": -1.0273333333333332,
+        "min_accel_x_ms2": -1.482,
+        "speed_drop_ms": -0.019999999999999574,
+        "start_msg_ms": 586035
+      },
+      {
+        "duration_s": 0.6,
+        "end_msg_ms": 1275324,
+        "mean_accel_x_ms2": -0.595,
+        "min_accel_x_ms2": -1.102,
+        "speed_drop_ms": 0.29999999999999893,
+        "start_msg_ms": 1274724
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 1277124,
+        "mean_accel_x_ms2": -0.877578947368421,
+        "min_accel_x_ms2": -2.212,
+        "speed_drop_ms": 1.2799999999999994,
+        "start_msg_ms": 1510496
+      },
+      {
+        "duration_s": 1.6,
+        "end_msg_ms": 1513896,
+        "mean_accel_x_ms2": -0.961809523809524,
+        "min_accel_x_ms2": -2.024,
+        "speed_drop_ms": 1.5300000000000011,
+        "start_msg_ms": 1512296
+      },
+      {
+        "duration_s": 2.7,
+        "end_msg_ms": 1516896,
+        "mean_accel_x_ms2": -0.559975,
+        "min_accel_x_ms2": -1.8319999999999999,
+        "speed_drop_ms": 4.77,
+        "start_msg_ms": 1514196
+      },
+      {
+        "duration_s": 0.7,
+        "end_msg_ms": 597946,
+        "mean_accel_x_ms2": -0.6836000000000001,
+        "min_accel_x_ms2": -0.9800000000000002,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 597246
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 1316724,
+        "mean_accel_x_ms2": -0.36580000000000007,
+        "min_accel_x_ms2": -1.6260000000000001,
+        "speed_drop_ms": 3.57,
+        "start_msg_ms": 1549896
+      },
+      {
+        "duration_s": 0.9,
+        "end_msg_ms": 1552896,
+        "mean_accel_x_ms2": -0.9312727272727273,
+        "min_accel_x_ms2": -1.7540000000000002,
+        "speed_drop_ms": 1.1600000000000001,
+        "start_msg_ms": 1551996
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 1553396,
+        "mean_accel_x_ms2": -0.698,
+        "min_accel_x_ms2": -1.122,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 1553296
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 635750,
+        "mean_accel_x_ms2": -0.8166666666666668,
+        "min_accel_x_ms2": -0.8280000000000001,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 635650
+      },
+      {
+        "duration_s": 5.0,
+        "end_msg_ms": 641250,
+        "mean_accel_x_ms2": -1.647344827586207,
+        "min_accel_x_ms2": -2.9139999999999997,
+        "speed_drop_ms": 3.47,
+        "start_msg_ms": 636250
+      }
+    ],
+    "events": [
+      {
+        "duration_s": 10.0,
+        "end_msg_ms": 73348,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -1.221881188118812,
+        "min_accel_x_ms2": -1.4120000000000001,
+        "speed_drop_ms": -1.13,
+        "start_msg_ms": 63348
+      },
+      {
+        "duration_s": 0.5,
+        "end_msg_ms": 94248,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -1.018857142857143,
+        "min_accel_x_ms2": -2.01,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 93748
+      },
+      {
+        "duration_s": 692.173,
+        "end_msg_ms": 940424,
+        "event_type": "hard_braking",
+        "mean_accel_x_ms2": -1.1017659574468086,
+        "min_accel_x_ms2": -4.5840000000000005,
+        "speed_drop_ms": 9.91,
+        "start_msg_ms": 248251
+      }
+    ],
+    "hard_event": {
+      "duration_s": 692.173,
+      "end_msg_ms": 940424,
+      "event_type": "hard_braking",
+      "mean_accel_x_ms2": -1.1017659574468086,
+      "min_accel_x_ms2": -4.5840000000000005,
+      "speed_drop_ms": 9.91,
+      "start_msg_ms": 248251
+    },
+    "stationary_tail": null
+  },
+  "expected_protocol": {
+    "ego_vehicle": "V001",
+    "final_stationary_window_expected_s": 60,
+    "hard_braking_events": 1,
+    "light_braking_events": 2
+  },
+  "mapped_to_v002_clock": null
+}

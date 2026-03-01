@@ -1,0 +1,28 @@
+{
+  "analysis_dir": "ml/data/convoy_analysis_site/",
+  "board_placement": "Front windshield of each car (line-of-sight, production-realistic)",
+  "duration_s": 195.507,
+  "formation_avg_spacing_m": 13.922386814819847,
+  "gps_start": {
+    "lat": 32.8596,
+    "lon": 35.4031
+  },
+  "hard_braking_peak_ms2": -8.63,
+  "location": "Rural road outside Deir Hanna, near Sonol station by Nahal Tzalmon, between Mghar and Eilaboun",
+  "notes": "Ego-only mesh recording. V002/V003 trajectories extracted from V001 RX log. V004-V006 are synthetic peers placed ahead of V003.",
+  "recording_date": "2026-02-28",
+  "source_files": {
+    "rx": "Convoy_recording_02282026/V001_rx_004.csv",
+    "tx": "Convoy_recording_02282026/V001_tx_004.csv"
+  },
+  "vehicles_recorded": [
+    "V001",
+    "V002",
+    "V003"
+  ],
+  "vehicles_synthetic": [
+    "V004",
+    "V005",
+    "V006"
+  ]
+}
