@@ -1,0 +1,46 @@
+{
+  "burst_loss": {
+    "enabled": 1,
+    "max_burst_length": 23,
+    "max_loss_cap": 0.4352760736196321,
+    "mean_burst_length": 2.0704371434672524
+  },
+  "latency": {
+    "base_ms": 1.0,
+    "jitter_std_ms": 32.63649419846042,
+    "notes": "Relative latency after per-link clock offset correction."
+  },
+  "notes": "Generated in ego-only mode; packet-loss/burst metrics are estimated from V001 RX spacing.",
+  "packet_loss": {
+    "base_rate": 0.1978527607361964,
+    "distance_threshold_1": 50,
+    "distance_threshold_2": 100,
+    "rate_tier_1": 0.1978527607361964,
+    "rate_tier_2": 0.1978527607361964,
+    "rate_tier_3": 0.1978527607361964
+  },
+  "sensor_noise": {
+    "accel_std_ms2": 0.2738441003721898,
+    "gps_std_m": 11.7271588969647,
+    "gyro_std_rad_s": 0.025352580762469972,
+    "heading_std_deg": 28.641240063889384,
+    "mag_std_ut": 20.205718806201347,
+    "speed_std_ms": 0.9649574076704546
+  },
+  "sensor_noise_driving": {
+    "accel_std_ms2": 0.2738441003721898,
+    "gps_std_m": 11.7271588969647,
+    "gyro_std_rad_s": 0.025352580762469972,
+    "heading_std_deg": 28.641240063889384,
+    "mag_std_ut": 20.205718806201347,
+    "speed_std_ms": 0.9649574076704546
+  },
+  "sensor_noise_stationary": {
+    "accel_std_ms2": 0.3838864755601707,
+    "gps_std_m": 3.75097437991461,
+    "gyro_std_rad_s": 0.05628710753356006,
+    "heading_std_deg": 18.48982798081313,
+    "mag_std_ut": 13.665757848544972,
+    "speed_std_ms": 0.08047478161629566
+  }
+}

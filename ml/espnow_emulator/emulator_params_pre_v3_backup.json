@@ -14,7 +14,7 @@
   },
   "burst_loss": {
     "enabled": true,
-    "mean_burst_length": 1.606,
+    "mean_burst_length": 1.245,
     "loss_multiplier": 2.5,
     "max_loss_cap": 0.1862
   },
@@ -36,7 +36,7 @@
     ],
     "loss_rate_range": [
       0.029,
-      0.25
+      0.2316
     ],
     "jitter_std_range_ms": [
       0.52,
@@ -100,12 +100,6 @@
         "loss_rate": null
       }
     },
-    "calibration_date": "2026-02-24",
-    "validated_against": "convoy_recording_02282026 + convoy_extra_data_02282026",
-    "rec2_v002_v001_pdr": 0.8522494887525562,
-    "rec2_v002_v001_latency_p95_ms": 3.0,
-    "rec2_v002_v001_mean_burst_length": 1.965986394557823,
-    "burst_update_method": "simple_average(rec1_mean_burst_length, rec2_v002_v001_mean_burst_length)",
-    "validation_date": "2026-03-01"
+    "calibration_date": "2026-02-24"
   }
 }

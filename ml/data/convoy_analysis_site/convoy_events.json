@@ -1,0 +1,386 @@
+{
+  "detected": {
+    "all_candidates": [
+      {
+        "duration_s": 5.1,
+        "end_msg_ms": 121071,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -1.3625769230769231,
+        "min_accel_x_ms2": -1.45,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 115971
+      },
+      {
+        "duration_s": 0.4,
+        "end_msg_ms": 122371,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -0.9032000000000002,
+        "min_accel_x_ms2": -0.98,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 121971
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 475687,
+        "mean_accel_x_ms2": -0.6025,
+        "min_accel_x_ms2": -1.1460000000000001,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 475587
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 476187,
+        "mean_accel_x_ms2": -0.040999999999999925,
+        "min_accel_x_ms2": -0.8599999999999999,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 476087
+      },
+      {
+        "duration_s": 3.208,
+        "end_msg_ms": 481995,
+        "mean_accel_x_ms2": -1.3278666666666663,
+        "min_accel_x_ms2": -2.362,
+        "speed_drop_ms": -1.46,
+        "start_msg_ms": 478787
+      },
+      {
+        "duration_s": 1.2,
+        "end_msg_ms": 486395,
+        "mean_accel_x_ms2": -0.3672,
+        "min_accel_x_ms2": -1.344,
+        "speed_drop_ms": -0.7099999999999991,
+        "start_msg_ms": 485195
+      },
+      {
+        "duration_s": 346.124,
+        "end_msg_ms": 489595,
+        "mean_accel_x_ms2": -1.3610000000000004,
+        "min_accel_x_ms2": -3.2060000000000004,
+        "speed_drop_ms": 2.2699999999999996,
+        "start_msg_ms": 143471
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 490295,
+        "mean_accel_x_ms2": -0.25449999999999995,
+        "min_accel_x_ms2": -0.978,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 490195
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 148071,
+        "mean_accel_x_ms2": -1.1903783783783781,
+        "min_accel_x_ms2": -2.7920000000000003,
+        "speed_drop_ms": -2.9699999999999998,
+        "start_msg_ms": 255924
+      },
+      {
+        "duration_s": 110.353,
+        "end_msg_ms": 258824,
+        "mean_accel_x_ms2": -0.9824444444444447,
+        "min_accel_x_ms2": -2.308,
+        "speed_drop_ms": 2.74,
+        "start_msg_ms": 148471
+      },
+      {
+        "duration_s": 344.624,
+        "end_msg_ms": 500295,
+        "mean_accel_x_ms2": -0.9963999999999998,
+        "min_accel_x_ms2": -1.32,
+        "speed_drop_ms": 0.54,
+        "start_msg_ms": 155671
+      },
+      {
+        "duration_s": 1.5,
+        "end_msg_ms": 158771,
+        "mean_accel_x_ms2": -0.5382162162162164,
+        "min_accel_x_ms2": -1.7200000000000002,
+        "speed_drop_ms": -0.05000000000000071,
+        "start_msg_ms": 157271
+      },
+      {
+        "duration_s": 345.624,
+        "end_msg_ms": 505095,
+        "mean_accel_x_ms2": -0.4231764705882354,
+        "min_accel_x_ms2": -1.6960000000000002,
+        "speed_drop_ms": 1.08,
+        "start_msg_ms": 159471
+      },
+      {
+        "duration_s": 0.3,
+        "end_msg_ms": 515895,
+        "mean_accel_x_ms2": -0.7593333333333333,
+        "min_accel_x_ms2": -0.9319999999999999,
+        "speed_drop_ms": -0.6100000000000003,
+        "start_msg_ms": 515595
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 516295,
+        "mean_accel_x_ms2": -0.6495000000000001,
+        "min_accel_x_ms2": -1.086,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 516195
+      },
+      {
+        "duration_s": 346.024,
+        "end_msg_ms": 518295,
+        "mean_accel_x_ms2": -0.5758222222222222,
+        "min_accel_x_ms2": -1.946,
+        "speed_drop_ms": -1.8599999999999994,
+        "start_msg_ms": 172271
+      },
+      {
+        "duration_s": 235.071,
+        "end_msg_ms": 518795,
+        "mean_accel_x_ms2": -0.30742857142857144,
+        "min_accel_x_ms2": -1.05,
+        "speed_drop_ms": -1.6799999999999997,
+        "start_msg_ms": 283724
+      },
+      {
+        "duration_s": 0.9,
+        "end_msg_ms": 287624,
+        "mean_accel_x_ms2": -0.9145555555555556,
+        "min_accel_x_ms2": -2.106,
+        "speed_drop_ms": -0.13999999999999968,
+        "start_msg_ms": 286724
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 179971,
+        "mean_accel_x_ms2": -0.819,
+        "min_accel_x_ms2": -1.072,
+        "speed_drop_ms": -1.0600000000000005,
+        "start_msg_ms": 524195
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 525195,
+        "mean_accel_x_ms2": -0.7290000000000001,
+        "min_accel_x_ms2": -1.232,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 525095
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 529995,
+        "mean_accel_x_ms2": -0.5355000000000001,
+        "min_accel_x_ms2": -1.054,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 529895
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 186071,
+        "mean_accel_x_ms2": -1.0762500000000002,
+        "min_accel_x_ms2": -1.6900000000000004,
+        "speed_drop_ms": -0.17999999999999972,
+        "start_msg_ms": 530295
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 186971,
+        "mean_accel_x_ms2": -0.6794736842105265,
+        "min_accel_x_ms2": -1.61,
+        "speed_drop_ms": -0.33999999999999986,
+        "start_msg_ms": 530795
+      },
+      {
+        "duration_s": 344.924,
+        "end_msg_ms": 532995,
+        "mean_accel_x_ms2": -0.9804,
+        "min_accel_x_ms2": -2.164,
+        "speed_drop_ms": 0.0600000000000005,
+        "start_msg_ms": 188071
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 533495,
+        "mean_accel_x_ms2": -0.562857142857143,
+        "min_accel_x_ms2": -1.1720000000000002,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 533295
+      },
+      {
+        "duration_s": 109.653,
+        "end_msg_ms": 300224,
+        "mean_accel_x_ms2": -1.2286666666666666,
+        "min_accel_x_ms2": -1.306,
+        "speed_drop_ms": -0.54,
+        "start_msg_ms": 190571
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 196771,
+        "mean_accel_x_ms2": -0.9216000000000001,
+        "min_accel_x_ms2": -1.2680000000000002,
+        "speed_drop_ms": 3.04,
+        "start_msg_ms": 306024
+      },
+      {
+        "duration_s": 0.8,
+        "end_msg_ms": 197871,
+        "mean_accel_x_ms2": -0.8033846153846154,
+        "min_accel_x_ms2": -1.1700000000000004,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 197071
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 204071,
+        "mean_accel_x_ms2": -1.7120000000000004,
+        "min_accel_x_ms2": -2.5960000000000005,
+        "speed_drop_ms": -1.410000000000001,
+        "start_msg_ms": 311724
+      },
+      {
+        "duration_s": 1.4,
+        "end_msg_ms": 207271,
+        "mean_accel_x_ms2": -0.847027027027027,
+        "min_accel_x_ms2": -2.212,
+        "speed_drop_ms": 0.8500000000000005,
+        "start_msg_ms": 205871
+      },
+      {
+        "duration_s": 344.624,
+        "end_msg_ms": 555795,
+        "mean_accel_x_ms2": -0.8204,
+        "min_accel_x_ms2": -0.9740000000000001,
+        "speed_drop_ms": 1.1599999999999993,
+        "start_msg_ms": 211171
+      },
+      {
+        "duration_s": 235.371,
+        "end_msg_ms": 563395,
+        "mean_accel_x_ms2": -1.9827058823529413,
+        "min_accel_x_ms2": -3.418,
+        "speed_drop_ms": -2.289999999999999,
+        "start_msg_ms": 328024
+      },
+      {
+        "duration_s": 0.0,
+        "end_msg_ms": 331124,
+        "mean_accel_x_ms2": -0.7838604651162793,
+        "min_accel_x_ms2": -2.0120000000000005,
+        "speed_drop_ms": 6.9399999999999995,
+        "start_msg_ms": 564595
+      },
+      {
+        "duration_s": 0.2,
+        "end_msg_ms": 227371,
+        "mean_accel_x_ms2": -1.042,
+        "min_accel_x_ms2": -1.2540000000000002,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 227171
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 577795,
+        "mean_accel_x_ms2": -0.6150000000000001,
+        "min_accel_x_ms2": -0.9600000000000002,
+        "speed_drop_ms": -1.6099999999999994,
+        "start_msg_ms": 577695
+      },
+      {
+        "duration_s": 3.3,
+        "end_msg_ms": 237371,
+        "mean_accel_x_ms2": -1.3101063829787236,
+        "min_accel_x_ms2": -4.1080000000000005,
+        "speed_drop_ms": 3.33,
+        "start_msg_ms": 234071
+      },
+      {
+        "duration_s": 109.753,
+        "end_msg_ms": 351224,
+        "mean_accel_x_ms2": -1.8025000000000004,
+        "min_accel_x_ms2": -1.8420000000000003,
+        "speed_drop_ms": -0.79,
+        "start_msg_ms": 241471
+      },
+      {
+        "duration_s": 0.1,
+        "end_msg_ms": 586895,
+        "mean_accel_x_ms2": -0.6755,
+        "min_accel_x_ms2": -1.174,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 586795
+      },
+      {
+        "duration_s": 0.5,
+        "end_msg_ms": 587795,
+        "mean_accel_x_ms2": -0.6967500000000001,
+        "min_accel_x_ms2": -1.3739999999999999,
+        "speed_drop_ms": 1.58,
+        "start_msg_ms": 587295
+      },
+      {
+        "duration_s": 110.853,
+        "end_msg_ms": 375124,
+        "mean_accel_x_ms2": -1.093777777777778,
+        "min_accel_x_ms2": -1.274,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 264271
+      },
+      {
+        "duration_s": 109.853,
+        "end_msg_ms": 418124,
+        "mean_accel_x_ms2": -1.2233333333333334,
+        "min_accel_x_ms2": -1.266,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 308271
+      }
+    ],
+    "events": [
+      {
+        "duration_s": 5.1,
+        "end_msg_ms": 121071,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -1.3625769230769231,
+        "min_accel_x_ms2": -1.45,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 115971
+      },
+      {
+        "duration_s": 0.4,
+        "end_msg_ms": 122371,
+        "event_type": "light_braking",
+        "mean_accel_x_ms2": -0.9032000000000002,
+        "min_accel_x_ms2": -0.98,
+        "speed_drop_ms": 0.0,
+        "start_msg_ms": 121971
+      },
+      {
+        "duration_s": 3.3,
+        "end_msg_ms": 237371,
+        "event_type": "hard_braking",
+        "mean_accel_x_ms2": -1.3101063829787236,
+        "min_accel_x_ms2": -4.1080000000000005,
+        "speed_drop_ms": 3.33,
+        "start_msg_ms": 234071
+      }
+    ],
+    "hard_event": {
+      "duration_s": 3.3,
+      "end_msg_ms": 237371,
+      "event_type": "hard_braking",
+      "mean_accel_x_ms2": -1.3101063829787236,
+      "min_accel_x_ms2": -4.1080000000000005,
+      "speed_drop_ms": 3.33,
+      "start_msg_ms": 234071
+    },
+    "stationary_tail": {
+      "duration_s": 301.872,
+      "end_msg_ms": 655996,
+      "start_msg_ms": 354124
+    }
+  },
+  "expected_protocol": {
+    "ego_vehicle": "V001",
+    "final_stationary_window_expected_s": 60,
+    "hard_braking_events": 1,
+    "light_braking_events": 2
+  },
+  "mapped_to_v002_clock": null
+}

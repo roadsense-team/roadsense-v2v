@@ -367,6 +367,7 @@ def write_manifest(
     eval_scenarios: List[str],
     augmentation_ranges: Dict[str, Tuple[float, float]],
     augmentation_config: Optional[AugmentationConfig] = None,
+    eval_peer_drop_prob: Optional[float] = None,
     peer_count_distribution: Optional[Dict[int, int]] = None,
 ) -> None:
     """
@@ -381,6 +382,7 @@ def write_manifest(
         eval_scenarios: List of eval scenario IDs
         augmentation_ranges: Dict of augmentation parameter ranges
         augmentation_config: Optional config for peer dropout and route randomization
+        eval_peer_drop_prob: Optional eval-only peer dropout override
         peer_count_distribution: Optional dict of {peer_count: scenario_count}
 
     File written: {output_dir}/manifest.json
@@ -416,6 +418,9 @@ def write_manifest(
             "container_image": _get_container_image(),
         },
     }
+
+    if eval_peer_drop_prob is not None:
+        manifest["augmentation_config"]["eval_peer_drop_prob"] = eval_peer_drop_prob
 
     if peer_count_distribution:
         manifest["peer_count_distribution"] = {
@@ -478,6 +483,15 @@ def _parse_args() -> argparse.Namespace:
         help="Probability of dropping each non-V001 vehicle (0.0-1.0)",
     )
     parser.add_argument(
+        "--eval_peer_drop_prob",
+        type=float,
+        default=None,
+        help=(
+            "Eval-only peer dropout probability. "
+            "Defaults to --peer_drop_prob when omitted."
+        ),
+    )
+    parser.add_argument(
         "--min_peers",
         type=int,
         default=1,
@@ -505,6 +519,12 @@ def main() -> None:
     if args.peer_drop_prob < 0.0 or args.peer_drop_prob > 1.0:
         raise ValueError("peer_drop_prob must be between 0.0 and 1.0.")
 
+    eval_peer_drop_prob = (
+        args.eval_peer_drop_prob if args.eval_peer_drop_prob is not None else args.peer_drop_prob
+    )
+    if eval_peer_drop_prob < 0.0 or eval_peer_drop_prob > 1.0:
+        raise ValueError("eval_peer_drop_prob must be between 0.0 and 1.0.")
+
     if args.min_peers < 0:
         raise ValueError("min_peers must be non-negative.")
 
@@ -519,8 +539,14 @@ def main() -> None:
     train_dir.mkdir(parents=True, exist_ok=True)
     eval_dir.mkdir(parents=True, exist_ok=True)
 
-    aug_config = AugmentationConfig(
+    train_aug_config = AugmentationConfig(
         peer_drop_prob=args.peer_drop_prob,
+        min_peers=args.min_peers,
+        route_randomize_non_ego=args.route_randomize_non_ego,
+        route_include_v001=args.route_include_v001,
+    )
+    eval_aug_config = AugmentationConfig(
+        peer_drop_prob=eval_peer_drop_prob,
         min_peers=args.min_peers,
         route_randomize_non_ego=args.route_randomize_non_ego,
         route_include_v001=args.route_include_v001,
@@ -538,7 +564,7 @@ def main() -> None:
             copy.deepcopy(routes_tree),
             rng,
             AUGMENTATION_RANGES,
-            aug_config,
+            train_aug_config,
         )
         peer_count_distribution[peer_count] = peer_count_distribution.get(peer_count, 0) + 1
         write_scenario(
@@ -559,7 +585,7 @@ def main() -> None:
             copy.deepcopy(routes_tree),
             rng,
             AUGMENTATION_RANGES,
-            aug_config,
+            eval_aug_config,
         )
         peer_count_distribution[peer_count] = peer_count_distribution.get(peer_count, 0) + 1
         write_scenario(
@@ -581,7 +607,8 @@ def main() -> None:
         train_scenarios=train_scenarios,
         eval_scenarios=eval_scenarios,
         augmentation_ranges=AUGMENTATION_RANGES,
-        augmentation_config=aug_config,
+        augmentation_config=train_aug_config,
+        eval_peer_drop_prob=eval_peer_drop_prob,
         peer_count_distribution=peer_count_distribution,
     )
 

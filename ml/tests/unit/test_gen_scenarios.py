@@ -3,6 +3,7 @@ Unit tests for scenario generator (Phase 1).
 """
 from __future__ import annotations
 
+import argparse
 import copy
 import json
 from pathlib import Path
@@ -186,6 +187,39 @@ def test_write_manifest_schema_valid(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert manifest["environment"]["sumo_version"] == "1.25.0"
     assert manifest["environment"]["git_commit"] == "abc1234"
     assert manifest["environment"]["container_image"] == "roadsense-ml:latest"
+
+
+def test_write_manifest_includes_eval_peer_drop_prob(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_dir = tmp_path / "base"
+    _make_base_dir(base_dir)
+    emulator_params = tmp_path / "emulator_params.json"
+    emulator_params.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(gen_scenarios, "_get_sumo_version", lambda: "1.25.0")
+    monkeypatch.setattr(gen_scenarios, "_get_git_commit", lambda: "abc1234")
+    monkeypatch.setattr(gen_scenarios, "_get_container_image", lambda: "roadsense-ml:latest")
+
+    output_dir = tmp_path / "dataset_v3"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    gen_scenarios.write_manifest(
+        output_dir=output_dir,
+        seed=42,
+        base_dir=base_dir,
+        emulator_params_path=emulator_params,
+        train_scenarios=["train_000"],
+        eval_scenarios=["eval_000"],
+        augmentation_ranges=gen_scenarios.AUGMENTATION_RANGES,
+        augmentation_config=gen_scenarios.AugmentationConfig(peer_drop_prob=0.4, min_peers=1),
+        eval_peer_drop_prob=0.0,
+    )
+
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["augmentation_config"]["peer_drop_prob"] == 0.4
+    assert manifest["augmentation_config"]["eval_peer_drop_prob"] == 0.0
 
 
 def test_validate_v001_spawn_pass(tmp_path: Path) -> None:
@@ -404,3 +438,54 @@ def test_augment_routes_with_route_randomization_config() -> None:
     root = augmented.getroot()
     v001 = root.find("vehicle[@id='V001']")
     assert v001.get("route") == "route_main"
+
+
+def test_main_uses_eval_peer_drop_prob_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_dir = tmp_path / "base"
+    output_dir = tmp_path / "dataset"
+    emulator_params = tmp_path / "emulator_params.json"
+    _make_base_dir(base_dir)
+    emulator_params.write_text("{}", encoding="utf-8")
+
+    args = argparse.Namespace(
+        base_dir=base_dir,
+        output_dir=output_dir,
+        seed=42,
+        train_count=2,
+        eval_count=3,
+        emulator_params=emulator_params,
+        peer_drop_prob=0.4,
+        eval_peer_drop_prob=0.0,
+        min_peers=1,
+        route_randomize_non_ego=False,
+        route_include_v001=False,
+    )
+    monkeypatch.setattr(gen_scenarios, "_parse_args", lambda: args)
+
+    sumocfg_tree = ET.ElementTree(ET.fromstring("<configuration><input/></configuration>"))
+    network_tree = ET.ElementTree(ET.fromstring("<net/>"))
+    routes_tree = _make_routes_tree_5_vehicles()
+    monkeypatch.setattr(
+        gen_scenarios,
+        "load_base_scenario",
+        lambda _base_dir: (sumocfg_tree, network_tree, routes_tree),
+    )
+
+    seen_drop_probs: list[float] = []
+
+    def _fake_augment_routes(_routes_tree, _rng, _params, config):
+        seen_drop_probs.append(config.peer_drop_prob)
+        return _routes_tree, 4
+
+    monkeypatch.setattr(gen_scenarios, "augment_routes", _fake_augment_routes)
+    monkeypatch.setattr(gen_scenarios, "write_scenario", lambda *_, **__: output_dir / "x")
+    monkeypatch.setattr(gen_scenarios, "validate_v001_spawn", lambda *_: True)
+    monkeypatch.setattr(gen_scenarios, "write_manifest", lambda *_, **__: None)
+
+    gen_scenarios.main()
+
+    assert seen_drop_probs[:2] == [0.4, 0.4]
+    assert seen_drop_probs[2:] == [0.0, 0.0, 0.0]

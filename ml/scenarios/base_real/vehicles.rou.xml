@@ -1,0 +1,16 @@
+<routes>
+  <vType id="car" accel="2.6" decel="5.000" sigma="0.5" length="5" maxSpeed="50" tau="1.000">
+    <param key="has.ssm.device" value="true" />
+    <param key="device.ssm.measures" value="TTC DRAC PET" />
+    <param key="device.ssm.thresholds" value="4.0 3.4 2.0" />
+    <param key="device.ssm.range" value="100.0" />
+    <param key="device.ssm.file" value="ssm_output.xml" />
+  </vType>
+  <route id="convoy_route" edges="-635191227" />
+  <vehicle id="V006" type="car" depart="0" route="convoy_route" departSpeed="2.130" departPos="82.813" departLane="0" color="1,0.5,0" />
+  <vehicle id="V005" type="car" depart="0" route="convoy_route" departSpeed="2.130" departPos="60.813" departLane="0" color="1,0.5,0" />
+  <vehicle id="V004" type="car" depart="0" route="convoy_route" departSpeed="2.130" departPos="38.813" departLane="0" color="1,0.5,0" />
+  <vehicle id="V003" type="car" depart="0" route="convoy_route" departSpeed="2.130" departPos="16.813" departLane="0" color="1,0,0" />
+  <vehicle id="V002" type="car" depart="0" route="convoy_route" departSpeed="1.746" departPos="10.921" departLane="0" color="0,1,0" />
+  <vehicle id="V001" type="car" depart="0" route="convoy_route" departSpeed="1.965" departPos="0.000" departLane="0" color="0,0,1" />
+</routes>

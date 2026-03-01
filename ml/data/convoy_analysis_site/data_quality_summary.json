@@ -1,0 +1,73 @@
+{
+  "clock_link_estimates": {},
+  "files": [
+    {
+      "accel_std_ms2": 0.9645154541870564,
+      "duplicate_timestamps": 0,
+      "duration_s": 195.507,
+      "file": "/home/amirkhalifa/RoadSense2/Convoy_recording_02282026/V001_tx_004.csv",
+      "gaps_gt_500ms": 0,
+      "gps_fix_pct": 100.0,
+      "gps_jump_max_m": 74.59817583801295,
+      "gps_jumps_gt_50m": 92,
+      "gyro_std_rad_s": 0.028125161978021923,
+      "mag_std_ut": 36.146129362713474,
+      "malformed_rows": 0,
+      "missing_rows": 0,
+      "rows_total": 4984,
+      "rows_valid": 4984,
+      "sensor_status": "WARN",
+      "speed_gps_corr": 0.08663149058398825,
+      "time_range_ms": [
+        115973,
+        311480
+      ],
+      "type": "tx",
+      "vehicle": "V001"
+    },
+    {
+      "accel_std_ms2": 0.9668280980533809,
+      "duplicate_timestamps": 0,
+      "duration_s": 195.539,
+      "file": "/home/amirkhalifa/RoadSense2/Convoy_recording_02282026/V001_rx_004.csv",
+      "gaps_gt_500ms": 2,
+      "gps_fix_pct": 100.0,
+      "gps_jump_max_m": 32.97417546171642,
+      "gps_jumps_gt_50m": 0,
+      "gyro_std_rad_s": 0.025348159059219135,
+      "mag_std_ut": 34.18313018111951,
+      "malformed_rows": 0,
+      "missing_rows": 0,
+      "rows_total": 3768,
+      "rows_valid": 3768,
+      "sensor_status": "WARN",
+      "speed_gps_corr": 0.15921633729595971,
+      "time_range_ms": [
+        115990,
+        311529
+      ],
+      "type": "rx",
+      "vehicle": "V001"
+    }
+  ],
+  "input_root": "/home/amirkhalifa/RoadSense2/Convoy_recording_02282026",
+  "mode": "ego_only",
+  "temporal_alignment": {
+    "mode": "ego_only",
+    "overlap_duration_s": 195.49,
+    "overlap_window_v001_ms": [
+      115990.0,
+      311480.0
+    ],
+    "ranges_in_v001_clock": {
+      "V001_rx": [
+        115990.0,
+        311529.0
+      ],
+      "V001_tx": [
+        115973.0,
+        311480.0
+      ]
+    }
+  }
+}
