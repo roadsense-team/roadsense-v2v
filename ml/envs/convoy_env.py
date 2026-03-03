@@ -30,6 +30,8 @@ class ConvoyEnv(gym.Env):
     DEFAULT_MAX_STEPS = 1000
     COLLISION_DIST = 5.0
     MAX_STARTUP_STEPS = 100
+    BRAKING_ACCEL_THRESHOLD = -0.5
+    BRAKING_SPEED_THRESHOLD = 0.5
 
     def __init__(
         self,
@@ -41,6 +43,9 @@ class ConvoyEnv(gym.Env):
         emulator_params_path: Optional[str] = None,
         max_steps: int = DEFAULT_MAX_STEPS,
         hazard_injection: bool = True,
+        hazard_target_strategy: str = HazardInjector.TARGET_STRATEGY_UNIFORM_FRONT_PEERS,
+        hazard_fixed_vehicle_id: Optional[str] = None,
+        hazard_fixed_rank_ahead: Optional[int] = None,
         render_mode: Optional[str] = None,
         gui: bool = False,
     ) -> None:
@@ -84,7 +89,15 @@ class ConvoyEnv(gym.Env):
         self.obs_builder = ObservationBuilder()
         self.action_applicator = ActionApplicator()
         self.reward_calculator = RewardCalculator()
-        self.hazard_injector = HazardInjector() if hazard_injection else None
+        self.hazard_injector = (
+            HazardInjector(
+                target_strategy=hazard_target_strategy,
+                fixed_vehicle_id=hazard_fixed_vehicle_id,
+                fixed_rank_ahead=hazard_fixed_rank_ahead,
+            )
+            if hazard_injection
+            else None
+        )
 
         self._step_count = 0
         self._sumo_started = False
@@ -130,6 +143,31 @@ class ConvoyEnv(gym.Env):
 
         return float(action)
 
+    def _extract_hazard_options(
+        self,
+        options: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if options is None:
+            return None
+
+        nested = options.get("hazard_options")
+        if isinstance(nested, dict):
+            return dict(nested)
+
+        mapped: Dict[str, Any] = {}
+        key_map = {
+            "hazard_target_strategy": "target_strategy",
+            "hazard_fixed_vehicle_id": "fixed_vehicle_id",
+            "hazard_fixed_rank_ahead": "fixed_rank_ahead",
+            "hazard_step": "hazard_step",
+            "hazard_force": "force_hazard",
+        }
+        for source_key, dest_key in key_map.items():
+            if source_key in options:
+                mapped[dest_key] = options[source_key]
+
+        return mapped if mapped else None
+
     def reset(
         self,
         seed: Optional[int] = None,
@@ -171,20 +209,26 @@ class ConvoyEnv(gym.Env):
             )
 
         if self.hazard_injector is not None:
+            hazard_options = self._extract_hazard_options(options)
             if seed is not None:
                 self.hazard_injector.seed(seed)
-            else:
-                self.hazard_injector.reset()
+            self.hazard_injector.reset(options=hazard_options)
 
         ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
         current_time_ms = int(self.sumo.get_simulation_time() * 1000)
 
-        observation, _ = self._step_espnow(ego_state, current_time_ms)
+        observation, _, _, _ = self._step_espnow(ego_state, current_time_ms)
 
         info = {
             "step": 0,
             "simulation_time": self.sumo.get_simulation_time(),
             "scenario_id": scenario_id,
+            "hazard_step": (
+                self.hazard_injector.hazard_step if self.hazard_injector else None
+            ),
+            "hazard_target_strategy": (
+                self.hazard_injector.target_strategy if self.hazard_injector else None
+            ),
         }
 
         return observation, info
@@ -209,8 +253,15 @@ class ConvoyEnv(gym.Env):
         ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
         current_time_ms = int(self.sumo.get_simulation_time() * 1000)
 
-        observation, peer_states = self._step_espnow(ego_state, current_time_ms)
-        distance = self._calculate_min_distance(ego_state, peer_states)
+        (
+            observation,
+            peer_states,
+            received_map,
+            any_braking_peer_received,
+        ) = self._step_espnow(ego_state, current_time_ms)
+        distance, closing_rate = self._calculate_min_distance_and_closing_rate(
+            ego_state, peer_states
+        )
 
         terminated = False
         truncated = False
@@ -228,13 +279,29 @@ class ConvoyEnv(gym.Env):
             distance=distance,
             action_value=action_value,
             deceleration=actual_decel,
+            closing_rate=closing_rate,
         )
+
+        hazard_source_id = None
+        hazard_step = None
+        hazard_source_rank_ahead = None
+        if self.hazard_injector is not None:
+            hazard_source_id = self.hazard_injector.hazard_target
+            hazard_step = self.hazard_injector.hazard_step
+            hazard_source_rank_ahead = self.hazard_injector.hazard_source_rank_ahead
+
+        mesh_received_source_ids = sorted(received_map.keys())
 
         info = {
             "step": self._step_count,
             "simulation_time": self.sumo.get_simulation_time(),
             "distance": distance,
             "hazard_injected": hazard_injected,
+            "hazard_source_id": hazard_source_id,
+            "hazard_step": hazard_step,
+            "hazard_source_rank_ahead": hazard_source_rank_ahead,
+            "mesh_received_source_ids": mesh_received_source_ids,
+            "mesh_any_braking_peer_received": any_braking_peer_received,
             **reward_info,
         }
 
@@ -244,16 +311,17 @@ class ConvoyEnv(gym.Env):
         self,
         ego_state: VehicleState,
         current_time_ms: int,
-    ) -> Tuple[Dict[str, np.ndarray], List[VehicleState]]:
+    ) -> Tuple[
+        Dict[str, np.ndarray],
+        List[VehicleState],
+        Dict[str, Any],
+        bool,
+    ]:
         ego_pos = (ego_state.x, ego_state.y)
         vehicle_states = {
             vehicle_id: self.sumo.get_vehicle_state(vehicle_id)
             for vehicle_id in traci.vehicle.getIDList()
         }
-        peer_states = [
-            state for vehicle_id, state in vehicle_states.items()
-            if vehicle_id != self.EGO_VEHICLE_ID
-        ]
 
         received_map = self.emulator.simulate_mesh_step(
             vehicle_states=vehicle_states,
@@ -271,10 +339,14 @@ class ConvoyEnv(gym.Env):
                 staleness_threshold,
             )
 
+        mesh_visible_peer_states: List[VehicleState] = []
+        any_braking_peer_received = False
+
         for received in received_map.values():
             msg = received.message
             age_ms = float(received.age_ms)
             valid = age_ms < staleness_threshold
+            source_id = msg.source_id or msg.vehicle_id
             peer_observations.append({
                 "x": msg.lon * meters_per_deg,
                 "y": msg.lat * meters_per_deg,
@@ -284,6 +356,25 @@ class ConvoyEnv(gym.Env):
                 "age_ms": age_ms,
                 "valid": valid,
             })
+            if not valid:
+                continue
+
+            mesh_visible_peer_states.append(
+                VehicleState(
+                    vehicle_id=source_id,
+                    x=msg.lon * meters_per_deg,
+                    y=msg.lat * meters_per_deg,
+                    speed=max(0.0, float(msg.speed)),
+                    acceleration=float(msg.accel_x),
+                    heading=float(msg.heading),
+                    lane_position=0.0,
+                )
+            )
+            if (
+                float(msg.accel_x) <= self.BRAKING_ACCEL_THRESHOLD
+                or float(msg.speed) <= self.BRAKING_SPEED_THRESHOLD
+            ):
+                any_braking_peer_received = True
 
         observation = self.obs_builder.build(
             ego_state=ego_state,
@@ -291,24 +382,36 @@ class ConvoyEnv(gym.Env):
             ego_pos=ego_pos,
         )
 
-        return observation, peer_states
+        return (
+            observation,
+            mesh_visible_peer_states,
+            dict(received_map),
+            any_braking_peer_received,
+        )
 
-    def _calculate_min_distance(
+    def _calculate_min_distance_and_closing_rate(
         self,
         ego_state: VehicleState,
         peer_states: Iterable[VehicleState],
-    ) -> float:
+    ) -> Tuple[float, float]:
         if not peer_states:
-            return 1000.0
+            return 1000.0, 0.0
 
         min_dist = float("inf")
+        nearest_peer = None
         for peer in peer_states:
             dx = peer.x - ego_state.x
             dy = peer.y - ego_state.y
             dist = (dx**2 + dy**2) ** 0.5
-            min_dist = min(min_dist, dist)
+            if dist < min_dist:
+                min_dist = dist
+                nearest_peer = peer
 
-        return min_dist
+        closing_rate = 0.0
+        if nearest_peer is not None:
+            closing_rate = ego_state.speed - nearest_peer.speed
+
+        return min_dist, closing_rate
 
     def _all_vehicles_active(self) -> bool:
         return self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID)

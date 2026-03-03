@@ -9,20 +9,21 @@ class RewardCalculator:
     """
     Calculates reward based on safety, comfort, and appropriateness.
 
-    Reward structure from ARCHITECTURE_V2_MINIMAL_RL.md:
-    - Collision: -100
-    - Unsafe proximity (<15m): -5
-    - Safe following (20-40m): +1
-    - Far (>40m): +0.5
+    Reward structure:
+    - Collision (<5m): -100
+    - Unsafe proximity (<10m): -5
+    - Neutral zone (10-15m): 0
+    - Safe following (15-35m): +1
+    - Far (>35m): +0.5
     - Comfort penalty scales with deceleration magnitude
     - Unnecessary strong braking at far distance is penalized
-    - Missed warning (<15m with near-zero braking) is penalized
+    - Missed warning (<10m, closing, no brake) is penalized
     """
 
     COLLISION_DIST = 5.0
-    UNSAFE_DIST = 15.0
-    SAFE_DIST_MIN = 20.0
-    SAFE_DIST_MAX = 40.0
+    UNSAFE_DIST = 10.0
+    SAFE_DIST_MIN = 15.0
+    SAFE_DIST_MAX = 35.0
 
     REWARD_COLLISION = -100.0
     REWARD_UNSAFE = -5.0
@@ -38,6 +39,8 @@ class RewardCalculator:
     PENALTY_UNNECESSARY_ALERT = -2.0
     PENALTY_UNNECESSARY_MAX_BRAKE = -4.0
     PENALTY_MISSED_WARNING = -3.0
+
+    CLOSING_RATE_THRESHOLD = 0.5
 
     def _safety_reward(self, distance: float) -> float:
         """Calculate safety component of reward."""
@@ -72,7 +75,9 @@ class RewardCalculator:
 
         return self.PENALTY_HARSH_BRAKE
 
-    def _appropriateness_reward(self, distance: float, deceleration: float) -> float:
+    def _appropriateness_reward(
+        self, distance: float, deceleration: float, closing_rate: float
+    ) -> float:
         """Calculate appropriateness penalty for continuous control."""
         decel_abs = abs(deceleration)
 
@@ -82,18 +87,28 @@ class RewardCalculator:
             if decel_abs > self.GENTLE_DECEL_THRESHOLD:
                 return self.PENALTY_UNNECESSARY_ALERT
 
-        if distance < self.UNSAFE_DIST and decel_abs <= self.GENTLE_DECEL_THRESHOLD:
+        if (
+            distance < self.UNSAFE_DIST
+            and closing_rate > self.CLOSING_RATE_THRESHOLD
+            and decel_abs <= self.GENTLE_DECEL_THRESHOLD
+        ):
             return self.PENALTY_MISSED_WARNING
 
         return 0.0
 
     def calculate(
-        self, distance: float, action_value: float, deceleration: float
+        self,
+        distance: float,
+        action_value: float,
+        deceleration: float,
+        closing_rate: float = 0.0,
     ) -> Tuple[float, Dict]:
         """Calculate total reward for current step."""
         safety = self._safety_reward(distance)
         comfort = self._comfort_penalty(deceleration)
-        appropriateness = self._appropriateness_reward(distance, deceleration)
+        appropriateness = self._appropriateness_reward(
+            distance, deceleration, closing_rate
+        )
 
         total = safety + comfort + appropriateness
 
@@ -105,6 +120,7 @@ class RewardCalculator:
             "distance": distance,
             "action_value": action_value,
             "deceleration": deceleration,
+            "closing_rate": closing_rate,
         }
 
         return total, info

@@ -120,6 +120,14 @@ class SUMOConnection:
             speed = 0.0
         traci.vehicle.setSpeed(vehicle_id, speed)
 
+    def release_vehicle_speed(self, vehicle_id: str) -> None:
+        """Release speed override, returning vehicle to car-following model."""
+        traci.vehicle.setSpeed(vehicle_id, -1)
+
+    def get_active_vehicle_ids(self) -> list:
+        """Get list of active vehicle IDs in simulation."""
+        return list(traci.vehicle.getIDList())
+
     def stop(self) -> None:
         """Stop SUMO simulation."""
         traci.close()

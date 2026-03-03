@@ -4,6 +4,8 @@ Phase C mesh-relay unit tests for ESPNOWEmulator.
 
 from dataclasses import dataclass
 
+import pytest
+
 from espnow_emulator.espnow_emulator import ESPNOWEmulator, V2VMessage
 
 
@@ -180,3 +182,82 @@ def test_mesh_no_relay_when_all_peers_behind():
     assert "V002" in received
     assert "V003" not in received
     assert "V004" not in received
+
+
+def test_mesh_uses_measured_distance_bins_to_limit_direct_links():
+    emulator = _make_emulator(max_range_m=100.0)
+    emulator.params["_metadata"] = {
+        "distance_bins": {
+            "0_20m": {"count": 10},
+            "20_50m": {"count": 10},
+            "50_100m": {"count": 0},
+            "100m_plus": {"count": 0},
+        }
+    }
+
+    states = {
+        "V001": _State("V001", 0.0, 0.0),
+        "V002": _State("V002", 0.0, 82.0),
+    }
+
+    received = emulator.simulate_mesh_step(states, ego_id="V001", current_time_ms=1000)
+
+    assert "V002" not in received
+
+
+def test_mesh_relay_hop_limit_blocks_far_source_in_long_chain():
+    emulator = _make_emulator(max_range_m=30.0)
+    emulator.params["mesh"] = {"max_relay_hops": 3}
+
+    states = {
+        "V001": _State("V001", 0.0, 0.0),
+        "V002": _State("V002", 0.0, 20.0),
+        "V003": _State("V003", 0.0, 40.0),
+        "V004": _State("V004", 0.0, 60.0),
+        "V005": _State("V005", 0.0, 80.0),
+        "V006": _State("V006", 0.0, 100.0),
+    }
+
+    received = emulator.simulate_mesh_step(states, ego_id="V001", current_time_ms=1000)
+
+    assert "V004" in received
+    assert "V005" in received
+    assert "V006" not in received
+
+
+def test_measured_distance_bins_increase_loss_with_distance():
+    emulator = ESPNOWEmulator(domain_randomization=False, seed=123)
+    emulator.params["_metadata"] = {
+        "distance_bins": {
+            "0_20m": {"count": 100, "loss_rate": 0.06},
+            "20_50m": {"count": 100, "loss_rate": 0.15},
+            "50_100m": {"count": 0, "loss_rate": None},
+            "100m_plus": {"count": 0, "loss_rate": None},
+        }
+    }
+
+    close_loss = emulator._get_loss_probability(10.0)
+    farther_loss = emulator._get_loss_probability(30.0)
+
+    assert close_loss == pytest.approx(0.06, abs=1e-6)
+    assert farther_loss == pytest.approx(0.15, abs=1e-6)
+    assert farther_loss > close_loss
+
+
+def test_measured_distance_bins_preserve_shape_under_domain_randomization():
+    emulator = ESPNOWEmulator(domain_randomization=True, seed=123)
+    emulator.params["packet_loss"]["base_rate"] = 0.05
+    emulator.episode_loss_base = 0.10  # 2x scale factor for this episode
+    emulator.params["_metadata"] = {
+        "distance_bins": {
+            "0_20m": {"count": 100, "loss_rate": 0.04},
+            "20_50m": {"count": 100, "loss_rate": 0.10},
+        }
+    }
+
+    close_loss = emulator._get_loss_probability(10.0)
+    farther_loss = emulator._get_loss_probability(30.0)
+
+    assert close_loss == pytest.approx(0.08, abs=1e-6)
+    assert farther_loss == pytest.approx(0.20, abs=1e-6)
+    assert farther_loss > close_loss

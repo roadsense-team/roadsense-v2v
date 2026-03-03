@@ -8,12 +8,13 @@ class ActionApplicator:
     Translates continuous RL action to SUMO vehicle speed control.
 
     Action semantics:
-    - 0.0: no deceleration
+    - 0.0: release to car-following model (no intervention)
     - 1.0: full deceleration (MAX_DECEL)
     """
 
-    MAX_DECEL = 5.0
+    MAX_DECEL = 8.0
     STEP_DT = 0.1
+    RELEASE_THRESHOLD = 0.02
     EGO_VEHICLE_ID = "V001"
 
     def __init__(self) -> None:
@@ -29,9 +30,18 @@ class ActionApplicator:
         """
         Apply action to ego vehicle.
 
-        Returns actual deceleration applied in m/s^2 after speed floor clipping.
+        When action is near zero, releases speed control to SUMO's
+        car-following model so the vehicle can accelerate naturally.
+
+        Returns actual deceleration applied in m/s^2 (0.0 when released).
         """
-        requested_decel = self.get_deceleration(action_value)
+        clamped = max(0.0, min(1.0, float(action_value)))
+
+        if clamped <= self.RELEASE_THRESHOLD:
+            sumo.release_vehicle_speed(self.EGO_VEHICLE_ID)
+            return 0.0
+
+        requested_decel = clamped * self.MAX_DECEL
 
         current_state = sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
         current_speed = current_state.speed

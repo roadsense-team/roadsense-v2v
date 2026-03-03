@@ -293,6 +293,10 @@ class ESPNOWEmulator:
                 'staleness_threshold_ms': 500,  # Messages older than this are marked invalid
                 'monitored_vehicles': ['V002', 'V003'],  # Vehicles to include in observation
             },
+            'mesh': {
+                # Match firmware relay policy (MAX_HOP_COUNT in hardware/src/config.h)
+                'max_relay_hops': 3,
+            },
             'domain_randomization': {
                 'latency_range_ms': [10, 80],
                 'loss_rate_range': [0.0, 0.15],
@@ -535,10 +539,8 @@ class ESPNOWEmulator:
         """
         Get packet loss probability based on distance.
 
-        Uses tiered model based on measured data:
-        - Close range (<threshold_1): base_rate
-        - Medium range: linear interpolation
-        - Far range (>threshold_2): high loss rate
+        Uses measured distance bins when available, otherwise falls back to
+        the legacy tiered model.
 
         Args:
             distance_m: Distance between sender and receiver in meters
@@ -550,6 +552,17 @@ class ESPNOWEmulator:
 
         base = self.episode_loss_base if self.domain_randomization else pl['base_rate']
 
+        measured_prob = self._get_measured_bin_loss_probability(distance_m)
+        if measured_prob is not None:
+            if self.domain_randomization:
+                base_nominal = float(pl.get('base_rate', 0.0))
+                if base_nominal > 0.0:
+                    scale = base / base_nominal
+                    measured_prob = measured_prob * scale
+                else:
+                    measured_prob = base
+            return max(0.0, min(1.0, float(measured_prob)))
+
         if distance_m < pl['distance_threshold_1']:
             return base
         elif distance_m < pl['distance_threshold_2']:
@@ -560,6 +573,98 @@ class ESPNOWEmulator:
         else:
             # Beyond threshold 2
             return pl['rate_tier_3']
+
+    def _get_measured_bin_loss_probability(self, distance_m: float) -> Optional[float]:
+        """
+        Return loss probability from measured distance bins when available.
+
+        Expected metadata schema:
+            _metadata.distance_bins = {
+                "0_20m": {"count": ..., "loss_rate": ...},
+                "20_50m": {"count": ..., "loss_rate": ...},
+                "100m_plus": {"count": ..., "loss_rate": ...},
+            }
+        """
+        metadata = self.params.get('_metadata', {})
+        if not isinstance(metadata, dict):
+            return None
+
+        bins = metadata.get('distance_bins', {})
+        if not isinstance(bins, dict):
+            return None
+
+        parsed_bins: List[Tuple[float, float, float]] = []
+        plus_bins: List[Tuple[float, float]] = []
+
+        for bin_name, stats in bins.items():
+            if not isinstance(stats, dict):
+                continue
+
+            count_raw = stats.get('count', 0)
+            loss_raw = stats.get('loss_rate')
+            if loss_raw is None:
+                continue
+
+            try:
+                count = float(count_raw)
+                loss_rate = float(loss_raw)
+            except (TypeError, ValueError):
+                continue
+
+            if count <= 0:
+                continue
+
+            name = str(bin_name)
+            if name.endswith("m_plus"):
+                try:
+                    lower = float(name[:-6])
+                except (TypeError, ValueError):
+                    continue
+                plus_bins.append((lower, loss_rate))
+                continue
+
+            if not name.endswith("m") or "_" not in name:
+                continue
+
+            try:
+                lower_str, upper_str = name[:-1].split("_", 1)
+                lower = float(lower_str)
+                upper = float(upper_str)
+            except (TypeError, ValueError):
+                continue
+
+            if upper <= lower:
+                continue
+
+            parsed_bins.append((lower, upper, loss_rate))
+
+        if not parsed_bins and not plus_bins:
+            return None
+
+        parsed_bins.sort(key=lambda item: (item[0], item[1]))
+
+        for lower, upper, loss_rate in parsed_bins:
+            if lower <= distance_m < upper:
+                return loss_rate
+
+        if parsed_bins:
+            if distance_m < parsed_bins[0][0]:
+                return parsed_bins[0][2]
+            if distance_m >= parsed_bins[-1][1]:
+                if plus_bins:
+                    plus_bins.sort(key=lambda item: item[0])
+                    for lower, loss_rate in plus_bins:
+                        if distance_m >= lower:
+                            return loss_rate
+                return parsed_bins[-1][2]
+
+        if plus_bins:
+            plus_bins.sort(key=lambda item: item[0])
+            for lower, loss_rate in plus_bins:
+                if distance_m >= lower:
+                    return loss_rate
+
+        return None
 
     def _get_latency(self, distance_m: float) -> float:
         """
@@ -630,9 +735,81 @@ class ESPNOWEmulator:
         return noisy
 
     def _mesh_max_range_m(self) -> float:
-        """Get hard communication range for mesh simulation."""
+        """
+        Get hard communication range for mesh simulation.
+
+        Uses measured coverage from _metadata.distance_bins when available.
+        This prevents extrapolating direct links beyond characterized distance.
+        """
         packet_cfg = self.params.get('packet_loss', {})
-        return float(packet_cfg.get('max_range_m', packet_cfg.get('distance_threshold_2', float('inf'))))
+
+        # Explicit override remains supported for controlled experiments.
+        if 'max_range_m' in packet_cfg:
+            return float(packet_cfg['max_range_m'])
+
+        measured_max = self._max_measured_distance_m()
+        if measured_max is not None:
+            return measured_max
+
+        return float(packet_cfg.get('distance_threshold_2', float('inf')))
+
+    def _max_measured_distance_m(self) -> Optional[float]:
+        """Infer maximum characterized distance from _metadata.distance_bins."""
+        metadata = self.params.get('_metadata', {})
+        if not isinstance(metadata, dict):
+            return None
+
+        bins = metadata.get('distance_bins', {})
+        if not isinstance(bins, dict):
+            return None
+
+        max_upper = None
+        has_plus_data = False
+
+        for bin_name, stats in bins.items():
+            if not isinstance(stats, dict):
+                continue
+
+            count = stats.get('count', 0)
+            try:
+                count_value = float(count)
+            except (TypeError, ValueError):
+                continue
+
+            if count_value <= 0:
+                continue
+
+            name = str(bin_name)
+            if name.endswith("m_plus"):
+                has_plus_data = True
+                continue
+
+            if not name.endswith("m") or "_" not in name:
+                continue
+
+            try:
+                _, upper_str = name[:-1].split("_", 1)
+                upper_m = float(upper_str)
+            except (TypeError, ValueError):
+                continue
+
+            if max_upper is None or upper_m > max_upper:
+                max_upper = upper_m
+
+        if has_plus_data:
+            return float("inf")
+
+        return max_upper
+
+    def _mesh_max_relay_hops(self) -> int:
+        """Get maximum relay hop count for mesh simulation."""
+        mesh_cfg = self.params.get('mesh', {})
+        raw = mesh_cfg.get('max_relay_hops', 3)
+        try:
+            hops = int(raw)
+        except (TypeError, ValueError):
+            hops = 3
+        return max(0, hops)
 
     def _is_in_cone(
         self,
@@ -768,6 +945,7 @@ class ESPNOWEmulator:
             raise KeyError(f"Ego vehicle '{ego_id}' missing from vehicle_states")
 
         vehicle_ids = list(vehicle_states.keys())
+        max_relay_hops = self._mesh_max_relay_hops()
         known_by_vehicle: Dict[str, Dict[Tuple[str, int], ReceivedMessage]] = {}
 
         for vehicle_id, state in vehicle_states.items():
@@ -805,6 +983,9 @@ class ESPNOWEmulator:
                         source_id = inbound.message.source_id or inbound.message.vehicle_id
 
                         if source_id != sender_id:
+                            if inbound.message.hop_count >= max_relay_hops:
+                                continue
+
                             source_state = vehicle_states.get(source_id)
                             if source_state is None:
                                 continue

@@ -43,8 +43,8 @@ def test_step_espnow_calls_simulate_mesh_step_with_all_states():
     )
 
 
-def test_step_espnow_returns_non_ego_peer_states_for_distance_logic():
-    """Returned peer list still contains all non-ego states."""
+def test_step_espnow_returns_mesh_visible_peer_states_for_distance_logic():
+    """Returned peer list contains only mesh-visible peers."""
     emulator = MagicMock()
     env = ConvoyEnv(sumo_cfg="dummy.sumocfg", emulator=emulator)
     states = {
@@ -54,12 +54,15 @@ def test_step_espnow_returns_non_ego_peer_states_for_distance_logic():
     }
     env.sumo = MagicMock()
     env.sumo.get_vehicle_state.side_effect = lambda vid: states[vid]
-    emulator.simulate_mesh_step.return_value = {}
+    msg = states["V003"].to_v2v_message(timestamp_ms=1000)
+    emulator.simulate_mesh_step.return_value = {
+        "V003": ReceivedMessage(message=msg, age_ms=10, received_at_ms=1010),
+    }
 
     with patch("traci.vehicle.getIDList", return_value=["V001", "V002", "V003"]):
-        _, peer_states = env._step_espnow(states["V001"], current_time_ms=1000)
+        _, peer_states, _, _ = env._step_espnow(states["V001"], current_time_ms=1000)
 
-    assert {state.vehicle_id for state in peer_states} == {"V002", "V003"}
+    assert {state.vehicle_id for state in peer_states} == {"V003"}
 
 
 def test_step_espnow_uses_mesh_messages_to_build_peer_observation():
@@ -78,7 +81,7 @@ def test_step_espnow_uses_mesh_messages_to_build_peer_observation():
     }
 
     with patch("traci.vehicle.getIDList", return_value=["V001", "V002"]):
-        obs, _ = env._step_espnow(states["V001"], current_time_ms=1000)
+        obs, _, _, _ = env._step_espnow(states["V001"], current_time_ms=1000)
 
     assert int(obs["peer_mask"].sum()) == 1
 
@@ -99,7 +102,7 @@ def test_step_espnow_normalizes_mesh_message_age():
     }
 
     with patch("traci.vehicle.getIDList", return_value=["V001", "V002"]):
-        obs, _ = env._step_espnow(states["V001"], current_time_ms=1000)
+        obs, _, _, _ = env._step_espnow(states["V001"], current_time_ms=1000)
 
     assert obs["peers"][0][5] == 14.0 / env.obs_builder.STALENESS_THRESHOLD
 
