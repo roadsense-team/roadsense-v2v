@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 003 - User-Data Template
+# RoadSense Training Run 004 - User-Data Template
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,7 +10,7 @@
 #   TOTAL_STEPS   - Training timesteps (default: 10000000)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 003 changes from Run 002:
+# Run 004 baseline from Run 003:
 #   - Dataset: dataset_v3/base_real (100% real-grounded, NOT synthetic base)
 #   - Generation: base_real, 25 train + 10 eval, peer_drop_prob=0.4
 #   - NO route randomization (single route in base_real, flags would no-op)
@@ -21,13 +21,14 @@
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_003"
+RUN_ID="cloud_prod_004"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=10000000
 S3_BUCKET="saferide-training-results"
 # ===========================================================
 
 export AWS_DEFAULT_REGION=il-central-1
+export AWS_REGION="$AWS_DEFAULT_REGION"
 WORK_DIR="/home/ubuntu/work"
 DATASET_DIR="ml/scenarios/datasets/dataset_v3/base_real"
 EMULATOR_PARAMS="ml/espnow_emulator/emulator_params_measured.json"
@@ -44,14 +45,14 @@ cleanup() {
     # Upload whatever results exist (model, checkpoints, metrics)
     if [ -d "$WORK_DIR/results" ]; then
         echo "Uploading results to S3..."
-        aws s3 cp "$WORK_DIR/results" "s3://$S3_BUCKET/$RUN_ID" --recursive || \
+        aws s3 cp "$WORK_DIR/results" "s3://$S3_BUCKET/$RUN_ID" --recursive --region "$AWS_DEFAULT_REGION" || \
             echo "WARNING: S3 upload failed. Results are still on disk at $WORK_DIR/results"
     else
         echo "WARNING: No results directory found at $WORK_DIR/results"
     fi
 
     # Also upload the training log itself for debugging
-    aws s3 cp /var/log/training-run.log "s3://$S3_BUCKET/$RUN_ID/training-run.log" || \
+    aws s3 cp /var/log/training-run.log "s3://$S3_BUCKET/$RUN_ID/training-run.log" --region "$AWS_DEFAULT_REGION" || \
         echo "WARNING: Could not upload training log to S3"
 
     echo "Finished: $(date -u)"
