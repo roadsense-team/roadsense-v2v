@@ -23,18 +23,44 @@ def _make_sumo(speed: float) -> MagicMock:
     return mock_sumo
 
 
-def test_action_applicator_zero_means_no_decel():
+def test_action_applicator_zero_releases_to_cf_model():
     applicator = ActionApplicator()
     mock_sumo = _make_sumo(20.0)
 
     actual_decel = applicator.apply(mock_sumo, 0.0)
 
-    mock_sumo.set_vehicle_speed.assert_called_once_with("V001", 20.0)
+    mock_sumo.release_vehicle_speed.assert_called_once_with("V001")
+    mock_sumo.set_vehicle_speed.assert_not_called()
     assert actual_decel == pytest.approx(0.0)
+
+
+def test_action_applicator_below_threshold_releases():
+    applicator = ActionApplicator()
+    mock_sumo = _make_sumo(15.0)
+
+    actual_decel = applicator.apply(mock_sumo, 0.01)
+
+    mock_sumo.release_vehicle_speed.assert_called_once_with("V001")
+    mock_sumo.set_vehicle_speed.assert_not_called()
+    assert actual_decel == pytest.approx(0.0)
+
+
+def test_action_applicator_at_threshold_applies_decel():
+    applicator = ActionApplicator()
+    mock_sumo = _make_sumo(20.0)
+
+    # Just above threshold should apply deceleration, not release
+    action = applicator.RELEASE_THRESHOLD + 0.01
+    actual_decel = applicator.apply(mock_sumo, action)
+
+    mock_sumo.release_vehicle_speed.assert_not_called()
+    mock_sumo.set_vehicle_speed.assert_called_once()
+    assert actual_decel > 0.0
 
 
 def test_action_applicator_one_means_max_decel():
     applicator = ActionApplicator()
+    assert applicator.MAX_DECEL == pytest.approx(8.0)
     mock_sumo = _make_sumo(20.0)
 
     actual_decel = applicator.apply(mock_sumo, 1.0)
@@ -46,6 +72,7 @@ def test_action_applicator_one_means_max_decel():
 
 def test_action_applicator_half_means_half_max_decel():
     applicator = ActionApplicator()
+    assert 0.5 * applicator.MAX_DECEL == pytest.approx(4.0)
     mock_sumo = _make_sumo(20.0)
 
     actual_decel = applicator.apply(mock_sumo, 0.5)
@@ -62,7 +89,7 @@ def test_action_applicator_clips_below_zero():
 
     actual_decel = applicator.apply(mock_sumo, -0.2)
 
-    mock_sumo.set_vehicle_speed.assert_called_once_with("V001", 10.0)
+    mock_sumo.release_vehicle_speed.assert_called_once_with("V001")
     assert actual_decel == pytest.approx(0.0)
 
 
@@ -96,3 +123,33 @@ def test_action_applicator_returns_actual_decel_applied():
 
     expected_decel = 0.6 * applicator.MAX_DECEL
     assert actual_decel == pytest.approx(expected_decel)
+
+
+def test_action_sensitivity_release_vs_max_brake():
+    """Confirm action=0 and action=1 produce materially different behavior."""
+    applicator = ActionApplicator()
+
+    mock_release = _make_sumo(20.0)
+    decel_release = applicator.apply(mock_release, 0.0)
+
+    mock_brake = _make_sumo(20.0)
+    decel_brake = applicator.apply(mock_brake, 1.0)
+
+    # Release should call release_vehicle_speed, brake should call set_vehicle_speed
+    mock_release.release_vehicle_speed.assert_called_once()
+    mock_release.set_vehicle_speed.assert_not_called()
+    mock_brake.set_vehicle_speed.assert_called_once()
+
+    # Decel values must be materially different
+    assert decel_release == pytest.approx(0.0)
+    assert decel_brake == pytest.approx(applicator.MAX_DECEL)
+    assert decel_brake - decel_release > 1.0
+
+
+def test_action_applicator_decel_at_full_action():
+    applicator = ActionApplicator()
+    mock_sumo = _make_sumo(20.0)
+
+    applicator.apply(mock_sumo, 1.0)
+
+    mock_sumo.set_vehicle_speed.assert_called_once_with("V001", pytest.approx(19.2))

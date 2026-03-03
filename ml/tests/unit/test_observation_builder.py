@@ -107,3 +107,40 @@ def test_build_observation_skips_invalid_peers():
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
     assert result["peer_mask"].sum() == pytest.approx(1.0)
+
+
+def test_build_observation_zero_peers_is_well_formed():
+    """With no peers at all, observation is valid with all-zero peer data."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state(speed=10.0)
+
+    result = builder.build(ego_state, [], (ego_state.x, ego_state.y))
+
+    assert result["peer_mask"].sum() == pytest.approx(0.0)
+    assert np.all(result["peers"] == 0.0)
+    assert np.isfinite(result["ego"]).all()
+    assert result["ego"][3] == pytest.approx(0.0)  # peer_count/MAX_PEERS = 0
+
+
+def test_build_observation_peers_behind_ego_filtered_by_cone():
+    """Peers directly behind ego are excluded by cone filter."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state(heading=0.0)  # Facing North
+    # Peer directly South (behind)
+    peers = [_make_peer_obs(0.0, -50.0, valid=True)]
+
+    result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
+
+    assert result["peer_mask"].sum() == pytest.approx(0.0)
+
+
+def test_build_observation_all_stale_peers_excluded():
+    """Peers with age above staleness threshold are excluded."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state(heading=0.0)
+    # Peer ahead but with stale data (age > 500ms threshold)
+    peers = [_make_peer_obs(0.0, 30.0, valid=False, age_ms=600)]
+
+    result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
+
+    assert result["peer_mask"].sum() == pytest.approx(0.0)

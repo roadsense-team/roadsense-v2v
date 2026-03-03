@@ -128,7 +128,7 @@ def env_with_mocks(mock_sumo, mock_emulator, tmp_path):
     cfg = tmp_path / "test.sumocfg"
     cfg.write_text("<configuration></configuration>")
 
-    with patch("envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+    with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
          patch("traci.vehicle.getIDList", return_value=["V001", "V002", "V003"]):
         env = ConvoyEnv(
             sumo_cfg=str(cfg),
@@ -207,7 +207,7 @@ def test_convoy_env_mesh_step_returns_correct_peer_count(
         "V003": _make_received_message("V003", x=0.0, y=40.0, age_ms=20, hop_count=1),
     }
 
-    obs, _ = env_with_mocks._step_espnow(states["V001"], current_time_ms=1000)
+    obs, _, _, _ = env_with_mocks._step_espnow(states["V001"], current_time_ms=1000)
 
     assert int(np.count_nonzero(obs["peer_mask"])) == 2
 
@@ -228,7 +228,7 @@ def test_convoy_env_observation_includes_relayed_peers(
         "V003": _make_received_message("V003", x=0.0, y=100.0, age_ms=14, hop_count=1),
     }
 
-    obs, _ = env_with_mocks._step_espnow(states["V001"], current_time_ms=1000)
+    obs, _, _, _ = env_with_mocks._step_espnow(states["V001"], current_time_ms=1000)
 
     assert obs["peer_mask"][0] == pytest.approx(1.0)
     assert obs["peers"][0][0] == pytest.approx(1.0, abs=1e-6)
@@ -250,7 +250,7 @@ def test_convoy_env_hop_count_reflected_in_message_age(
         "V002": _make_received_message("V002", x=0.0, y=20.0, age_ms=14, hop_count=1),
     }
 
-    obs, _ = env_with_mocks._step_espnow(states["V001"], current_time_ms=1000)
+    obs, _, _, _ = env_with_mocks._step_espnow(states["V001"], current_time_ms=1000)
 
     expected_age_norm = 14.0 / ObservationBuilder.STALENESS_THRESHOLD
     assert obs["peers"][0][5] == pytest.approx(expected_age_norm)
@@ -310,7 +310,7 @@ def test_reset_times_out_when_ego_missing(tmp_path, mock_emulator):
     cfg = tmp_path / "test.sumocfg"
     cfg.write_text("<configuration></configuration>")
 
-    with patch("envs.convoy_env.SUMOConnection") as mock_sumo_class, \
+    with patch("ml.envs.convoy_env.SUMOConnection") as mock_sumo_class, \
          patch("traci.vehicle.getIDList", return_value=["V001"]):
         mock_sumo = Mock()
         mock_sumo.start = Mock()
@@ -339,7 +339,7 @@ def test_reset_with_seed_is_reproducible(tmp_path, mock_emulator):
     cfg = tmp_path / "test.sumocfg"
     cfg.write_text("<configuration></configuration>")
 
-    with patch("envs.convoy_env.SUMOConnection") as mock_sumo_class, \
+    with patch("ml.envs.convoy_env.SUMOConnection") as mock_sumo_class, \
          patch("traci.vehicle.getIDList", return_value=["V001"]):
         mock_sumo = Mock()
         mock_sumo.start = Mock()
@@ -368,7 +368,7 @@ def test_reset_with_seed_is_reproducible(tmp_path, mock_emulator):
         env.close()
 
 
-def test_collision_sets_terminated_true(env_with_mocks, mock_sumo):
+def test_collision_sets_terminated_true(env_with_mocks, mock_sumo, mock_emulator):
     """Distance < 5m -> terminated=True."""
     env_with_mocks.reset()
 
@@ -378,6 +378,9 @@ def test_collision_sets_terminated_true(env_with_mocks, mock_sumo):
         "V003": _make_state("V003", x=100.0, y=0.0),
     }
     _set_states(mock_sumo, states)
+    mock_emulator.simulate_mesh_step.return_value = {
+        "V002": _make_received_message("V002", x=4.0, y=0.0, age_ms=10, hop_count=0),
+    }
 
     _, _, terminated, truncated, _ = env_with_mocks.step(0)
 
@@ -385,7 +388,7 @@ def test_collision_sets_terminated_true(env_with_mocks, mock_sumo):
     assert truncated is False
 
 
-def test_collision_reward_is_negative_100(env_with_mocks, mock_sumo):
+def test_collision_reward_is_negative_100(env_with_mocks, mock_sumo, mock_emulator):
     """Collision step reward is -100."""
     env_with_mocks.reset()
 
@@ -395,6 +398,9 @@ def test_collision_reward_is_negative_100(env_with_mocks, mock_sumo):
         "V003": _make_state("V003", x=100.0, y=0.0),
     }
     _set_states(mock_sumo, states)
+    mock_emulator.simulate_mesh_step.return_value = {
+        "V002": _make_received_message("V002", x=3.0, y=0.0, age_ms=10, hop_count=0),
+    }
 
     _, _, _, _, info = env_with_mocks.step(0)
 
@@ -415,6 +421,74 @@ def test_no_collision_terminated_is_false(env_with_mocks, mock_sumo):
     _, _, terminated, _, _ = env_with_mocks.step(0)
 
     assert terminated is False
+
+
+def test_reward_distance_defaults_far_when_no_mesh_reception(env_with_mocks, mock_sumo, mock_emulator):
+    """Ground-truth close peers should not penalize reward if mesh sees nobody."""
+    env_with_mocks.reset()
+
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0, speed=12.0),
+        "V002": _make_state("V002", x=3.0, y=0.0, speed=0.0),
+        "V003": _make_state("V003", x=6.0, y=0.0, speed=0.0),
+    }
+    _set_states(mock_sumo, states)
+    mock_emulator.simulate_mesh_step.return_value = {}
+
+    _, _, terminated, _, info = env_with_mocks.step(np.array([0.2], dtype=np.float32))
+
+    assert terminated is False
+    assert info["distance"] == pytest.approx(1000.0)
+    assert info["reward_safety"] == pytest.approx(0.5)
+
+
+def test_reward_penalty_when_mesh_visible_peer_is_close(
+    env_with_mocks,
+    mock_sumo,
+    mock_emulator,
+):
+    """Unsafe-distance penalty should trigger from mesh-visible peer state."""
+    env_with_mocks.reset()
+
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0, speed=12.0),
+        "V002": _make_state("V002", x=60.0, y=0.0, speed=8.0),
+        "V003": _make_state("V003", x=120.0, y=0.0, speed=8.0),
+    }
+    _set_states(mock_sumo, states)
+    mock_emulator.simulate_mesh_step.return_value = {
+        "V002": _make_received_message("V002", x=7.0, y=0.0, age_ms=10, hop_count=0),
+    }
+
+    _, _, terminated, _, info = env_with_mocks.step(np.array([0.2], dtype=np.float32))
+
+    assert terminated is False
+    assert info["distance"] == pytest.approx(7.0, abs=1e-3)
+    assert info["reward_safety"] == pytest.approx(-5.0)
+
+
+def test_reward_distance_uses_mesh_visible_peers_not_ground_truth(
+    env_with_mocks,
+    mock_sumo,
+    mock_emulator,
+):
+    """Reward distance must come from mesh-visible peers only."""
+    env_with_mocks.reset()
+
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0, speed=12.0),
+        "V002": _make_state("V002", x=120.0, y=0.0, speed=8.0),
+        "V003": _make_state("V003", x=160.0, y=0.0, speed=8.0),
+    }
+    _set_states(mock_sumo, states)
+    mock_emulator.simulate_mesh_step.return_value = {
+        "V002": _make_received_message("V002", x=6.0, y=0.0, age_ms=20, hop_count=0),
+    }
+
+    _, _, _, _, info = env_with_mocks.step(np.array([0.2], dtype=np.float32))
+
+    assert info["distance"] == pytest.approx(6.0, abs=1e-3)
+    assert info["reward_safety"] == pytest.approx(-5.0)
 
 
 def test_max_steps_sets_truncated_true(env_with_mocks, mock_sumo):
@@ -474,7 +548,7 @@ class TestConvoyEnvDataset:
         dataset_dir = tmp_path / "dataset"
         _make_dataset_dir(dataset_dir)
 
-        with patch("envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+        with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
              patch("traci.vehicle.getIDList", return_value=["V001"]):
             env = ConvoyEnv(
                 dataset_dir=str(dataset_dir),
@@ -504,7 +578,7 @@ class TestConvoyEnvDataset:
         dataset_dir = tmp_path / "dataset"
         _make_dataset_dir(dataset_dir)
 
-        with patch("envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+        with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
              patch("traci.vehicle.getIDList", return_value=["V001"]):
             env = ConvoyEnv(
                 dataset_dir=str(dataset_dir),
@@ -527,7 +601,7 @@ class TestConvoyEnvDataset:
         dataset_dir = tmp_path / "dataset"
         _make_dataset_dir(dataset_dir)
 
-        with patch("envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+        with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
              patch("traci.vehicle.getIDList", return_value=["V001"]):
             env = ConvoyEnv(
                 dataset_dir=str(dataset_dir),
@@ -545,7 +619,7 @@ class TestConvoyEnvDataset:
         cfg = tmp_path / "single.sumocfg"
         cfg.write_text("<configuration></configuration>")
 
-        with patch("envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+        with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
              patch("traci.vehicle.getIDList", return_value=["V001"]):
             env = ConvoyEnv(
                 sumo_cfg=str(cfg),
