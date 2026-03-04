@@ -39,7 +39,7 @@ def mock_sumo():
 
 
 def test_hazard_injector_respects_probability():
-    """~30% of episodes get a hazard (statistical test)."""
+    """~50% of episodes get a hazard (statistical test)."""
     hazard_count = 0
 
     for i in range(1000):
@@ -48,7 +48,7 @@ def test_hazard_injector_respects_probability():
         if inj._episode_will_have_hazard:
             hazard_count += 1
 
-    assert 200 <= hazard_count <= 400, f"Got {hazard_count}, expected ~300"
+    assert 400 <= hazard_count <= 600, f"Got {hazard_count}, expected ~500"
 
 
 def test_hazard_injector_only_injects_in_window(mock_sumo):

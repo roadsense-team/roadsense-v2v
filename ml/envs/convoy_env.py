@@ -208,6 +208,16 @@ class ConvoyEnv(gym.Env):
                 f"Timeout: {self.EGO_VEHICLE_ID} failed to spawn."
             )
 
+        # Warmup: let SUMO's CF model stabilize the convoy before RL takes over.
+        # Prevents spawn-time collisions when vehicles start too close together.
+        WARMUP_STEPS = 30
+        for _ in range(WARMUP_STEPS):
+            self.sumo.step()
+            if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
+                self.sumo.stop()
+                self._sumo_started = False
+                raise RuntimeError("V001 left simulation during warmup.")
+
         if self.hazard_injector is not None:
             hazard_options = self._extract_hazard_options(options)
             if seed is not None:
@@ -280,6 +290,7 @@ class ConvoyEnv(gym.Env):
             action_value=action_value,
             deceleration=actual_decel,
             closing_rate=closing_rate,
+            any_braking_peer=any_braking_peer_received,
         )
 
         hazard_source_id = None

@@ -4,6 +4,8 @@ Unit tests for RewardCalculator.
 Distance bands: collision(<5m), unsafe(5-10m), neutral(10-15m), safe(15-35m), far(>35m)
 """
 
+import pytest
+
 from envs.reward_calculator import RewardCalculator
 
 
@@ -114,6 +116,7 @@ def test_reward_calculate_combines_all_components():
     assert info["reward_safety"] == 1.0
     assert info["reward_comfort"] == 0.0
     assert info["reward_appropriateness"] == 0.0
+    assert info["reward_early_reaction"] == 0.0
 
 
 def test_reward_calculate_returns_info_dict():
@@ -123,11 +126,13 @@ def test_reward_calculate_returns_info_dict():
     assert "reward_safety" in info
     assert "reward_comfort" in info
     assert "reward_appropriateness" in info
+    assert "reward_early_reaction" in info
     assert "reward_total" in info
     assert "distance" in info
     assert "action_value" in info
     assert "deceleration" in info
     assert "closing_rate" in info
+    assert "any_braking_peer" in info
 
 
 def test_reward_calculate_passes_closing_rate():
@@ -137,3 +142,73 @@ def test_reward_calculate_passes_closing_rate():
     )
     assert info["closing_rate"] == 3.0
     assert info["reward_appropriateness"] == -3.0
+
+
+# --- Early reaction bonus tests ---
+
+
+def test_early_reaction_bonus_when_braking_peer_and_safe_distance():
+    """Proactive braking in safe zone with braking peer -> +2.0 bonus."""
+    calc = RewardCalculator()
+    bonus = calc._early_reaction_bonus(
+        distance=20.0, deceleration=1.0, any_braking_peer=True
+    )
+    assert bonus == 2.0
+
+
+def test_early_reaction_no_bonus_without_braking_peer():
+    """No bonus if no braking peer detected."""
+    calc = RewardCalculator()
+    bonus = calc._early_reaction_bonus(
+        distance=20.0, deceleration=1.0, any_braking_peer=False
+    )
+    assert bonus == 0.0
+
+
+def test_early_reaction_no_bonus_when_already_unsafe():
+    """No bonus if already in unsafe zone (<10m) — too late for proactive."""
+    calc = RewardCalculator()
+    bonus = calc._early_reaction_bonus(
+        distance=8.0, deceleration=1.0, any_braking_peer=True
+    )
+    assert bonus == 0.0
+
+
+def test_early_reaction_no_bonus_when_not_braking():
+    """No bonus if model isn't actually braking (decel < threshold)."""
+    calc = RewardCalculator()
+    bonus = calc._early_reaction_bonus(
+        distance=20.0, deceleration=0.2, any_braking_peer=True
+    )
+    assert bonus == 0.0
+
+
+def test_early_reaction_at_decel_threshold():
+    """Decel exactly at threshold (0.5) gets the bonus."""
+    calc = RewardCalculator()
+    bonus = calc._early_reaction_bonus(
+        distance=20.0, deceleration=0.5, any_braking_peer=True
+    )
+    assert bonus == 2.0
+
+
+def test_early_reaction_at_unsafe_boundary():
+    """Distance exactly at UNSAFE_DIST (10m) gets no bonus."""
+    calc = RewardCalculator()
+    bonus = calc._early_reaction_bonus(
+        distance=10.0, deceleration=1.0, any_braking_peer=True
+    )
+    assert bonus == 0.0
+
+
+def test_early_reaction_integrated_in_calculate():
+    """Early reaction bonus flows into total reward via calculate()."""
+    calc = RewardCalculator()
+    total, info = calc.calculate(
+        distance=25.0, action_value=0.1, deceleration=1.0,
+        closing_rate=0.0, any_braking_peer=True,
+    )
+    assert info["reward_early_reaction"] == 2.0
+    # safety(+1) + comfort(negative) + appropriateness(0) + early_reaction(+2)
+    expected = info["reward_safety"] + info["reward_comfort"] + info["reward_appropriateness"] + 2.0
+    assert total == pytest.approx(expected)

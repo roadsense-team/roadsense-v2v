@@ -295,14 +295,15 @@ def test_reset_restarts_sumo_simulation(env_with_mocks, mock_sumo):
 
 
 def test_reset_waits_for_ego_spawn(env_with_mocks, mock_sumo):
-    """reset() steps until V001 is active."""
+    """reset() steps until V001 is active, then runs 30-step warmup."""
     mock_sumo.is_vehicle_active = Mock(
-        side_effect=[False, False, True],
+        side_effect=[False, False] + [True] * 31,
     )
 
     env_with_mocks.reset()
 
-    assert mock_sumo.step.call_count == 2
+    # 2 startup steps + 30 warmup steps = 32
+    assert mock_sumo.step.call_count == 32
 
 
 def test_reset_times_out_when_ego_missing(tmp_path, mock_emulator):

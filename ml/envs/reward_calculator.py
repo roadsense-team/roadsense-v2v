@@ -42,6 +42,9 @@ class RewardCalculator:
 
     CLOSING_RATE_THRESHOLD = 0.5
 
+    REWARD_EARLY_REACTION = 2.0
+    EARLY_REACTION_DECEL_THRESHOLD = 0.5
+
     def _safety_reward(self, distance: float) -> float:
         """Calculate safety component of reward."""
         if distance < self.COLLISION_DIST:
@@ -96,12 +99,25 @@ class RewardCalculator:
 
         return 0.0
 
+    def _early_reaction_bonus(
+        self, distance: float, deceleration: float, any_braking_peer: bool
+    ) -> float:
+        """Bonus for proactive braking before distance becomes unsafe."""
+        if not any_braking_peer:
+            return 0.0
+        if distance <= self.UNSAFE_DIST:
+            return 0.0
+        if abs(deceleration) < self.EARLY_REACTION_DECEL_THRESHOLD:
+            return 0.0
+        return self.REWARD_EARLY_REACTION
+
     def calculate(
         self,
         distance: float,
         action_value: float,
         deceleration: float,
         closing_rate: float = 0.0,
+        any_braking_peer: bool = False,
     ) -> Tuple[float, Dict]:
         """Calculate total reward for current step."""
         safety = self._safety_reward(distance)
@@ -109,18 +125,23 @@ class RewardCalculator:
         appropriateness = self._appropriateness_reward(
             distance, deceleration, closing_rate
         )
+        early_reaction = self._early_reaction_bonus(
+            distance, deceleration, any_braking_peer
+        )
 
-        total = safety + comfort + appropriateness
+        total = safety + comfort + appropriateness + early_reaction
 
         info = {
             "reward_safety": safety,
             "reward_comfort": comfort,
             "reward_appropriateness": appropriateness,
+            "reward_early_reaction": early_reaction,
             "reward_total": total,
             "distance": distance,
             "action_value": action_value,
             "deceleration": deceleration,
             "closing_rate": closing_rate,
+            "any_braking_peer": any_braking_peer,
         }
 
         return total, info
