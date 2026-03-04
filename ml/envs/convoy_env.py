@@ -260,6 +260,20 @@ class ConvoyEnv(gym.Env):
         self.sumo.step()
         self._step_count += 1
 
+        # V001 may have reached end-of-route — check BEFORE querying state.
+        if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
+            empty_obs = {
+                "ego": np.zeros(4, dtype=np.float32),
+                "peers": np.zeros((self.MAX_PEERS, 6), dtype=np.float32),
+                "peer_mask": np.zeros(self.MAX_PEERS, dtype=np.float32),
+            }
+            return empty_obs, 0.0, False, True, {
+                "step": self._step_count,
+                "simulation_time": self.sumo.get_simulation_time(),
+                "distance": 1000.0,
+                "truncated_reason": "ego_route_ended",
+            }
+
         ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
         current_time_ms = int(self.sumo.get_simulation_time() * 1000)
 
@@ -280,9 +294,6 @@ class ConvoyEnv(gym.Env):
             terminated = True
 
         if self._step_count >= self.max_steps:
-            truncated = True
-
-        if not self._all_vehicles_active():
             truncated = True
 
         reward, reward_info = self.reward_calculator.calculate(

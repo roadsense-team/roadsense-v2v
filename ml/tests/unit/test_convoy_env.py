@@ -514,14 +514,19 @@ def test_max_steps_sets_truncated_true(env_with_mocks, mock_sumo):
 
 
 def test_ego_exit_sets_truncated_true(env_with_mocks, mock_sumo):
-    """If ego leaves simulation -> truncated=True."""
+    """If ego leaves simulation -> truncated=True with empty obs."""
     env_with_mocks.reset()
 
     mock_sumo.is_vehicle_active = Mock(return_value=False)
 
-    _, _, _, truncated, _ = env_with_mocks.step(0)
+    obs, reward, terminated, truncated, info = env_with_mocks.step(0)
 
     assert truncated is True
+    assert terminated is False
+    assert reward == 0.0
+    assert obs["ego"].shape == (4,)
+    assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
+    assert info.get("truncated_reason") == "ego_route_ended"
 
 
 def test_truncated_does_not_apply_collision_reward(env_with_mocks, mock_sumo):
