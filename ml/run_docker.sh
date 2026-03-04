@@ -122,41 +122,41 @@ setup_gui() {
 run_container() {
     local mode="${1:-test}"
     local gui_args=""
-    local cmd=""
+    local cmd=()
     local interactive=""
 
     case "$mode" in
         test|tests)
             log_info "Running unit tests (headless)..."
-            cmd="pytest ml/tests/unit/ -v --tb=short"
+            cmd=(pytest ml/tests/unit/ -v --tb=short)
             ;;
         integration)
             log_info "Running integration tests (requires SUMO)..."
-            cmd="pytest ml/tests/integration/ -v --tb=short"
+            cmd=(pytest ml/tests/integration/ -v --tb=short)
             ;;
         gui|shell|bash)
             log_info "Starting interactive shell with GUI support..."
             gui_args=$(setup_gui)
-            cmd="bash"
+            cmd=(bash)
             interactive="-it"
             ;;
         demo)
             log_info "Running GUI demo..."
             gui_args=$(setup_gui)
-            cmd="python3 ml/demo_convoy_gui.py"
+            cmd=(python3 ml/demo_convoy_gui.py)
             interactive="-it"
             ;;
         train)
             log_info "Running RL training (headless)..."
-            cmd="python3 -m ml.training.train_convoy ${*:2}"
+            cmd=(python3 -m ml.training.train_convoy "${@:2}")
             ;;
         generate)
             log_info "Generating scenarios..."
-            cmd="python -m ml.scripts.gen_scenarios ${*:2}"
+            cmd=(python -m ml.scripts.gen_scenarios "${@:2}")
             ;;
         *)
-            # Pass through custom command
-            cmd="$*"
+            # Pass through custom command — preserve argument boundaries
+            cmd=("$@")
             ;;
     esac
 
@@ -172,7 +172,7 @@ run_container() {
         -v "$REPO_ROOT:/work:Z" \
         -w /work \
         "$IMAGE_NAME" \
-        $cmd
+        "${cmd[@]}"
 }
 
 # Show help
