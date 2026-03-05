@@ -30,8 +30,7 @@ class ConvoyEnv(gym.Env):
     DEFAULT_MAX_STEPS = 1000
     COLLISION_DIST = 5.0
     MAX_STARTUP_STEPS = 100
-    BRAKING_ACCEL_THRESHOLD = -0.5
-    BRAKING_SPEED_THRESHOLD = 0.5
+    BRAKING_ACCEL_THRESHOLD = -3.5
 
     def __init__(
         self,
@@ -340,7 +339,6 @@ class ConvoyEnv(gym.Env):
             action_value=action_value,
             deceleration=actual_decel,
             closing_rate=closing_rate,
-            any_braking_peer=any_braking_peer_received,
         )
 
         hazard_source_id = None
@@ -437,10 +435,7 @@ class ConvoyEnv(gym.Env):
                     lane_position=0.0,
                 )
             )
-            if (
-                float(msg.accel_x) <= self.BRAKING_ACCEL_THRESHOLD
-                or float(msg.speed) <= self.BRAKING_SPEED_THRESHOLD
-            ):
+            if float(msg.accel_x) <= self.BRAKING_ACCEL_THRESHOLD:
                 any_braking_peer_received = True
 
         observation = self.obs_builder.build(

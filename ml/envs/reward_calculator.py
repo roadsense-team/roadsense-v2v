@@ -42,13 +42,6 @@ class RewardCalculator:
 
     CLOSING_RATE_THRESHOLD = 0.5
 
-    REWARD_EARLY_REACTION = 2.0
-    EARLY_REACTION_DECEL_THRESHOLD = 0.5
-
-    PENALTY_IGNORING_HAZARD = -5.0
-    IGNORING_HAZARD_DIST_THRESHOLD = 30.0
-    IGNORING_HAZARD_DECEL_THRESHOLD = 0.5
-
     def _safety_reward(self, distance: float) -> float:
         """Calculate safety component of reward."""
         if distance < self.COLLISION_DIST:
@@ -103,30 +96,6 @@ class RewardCalculator:
 
         return 0.0
 
-    def _early_reaction_bonus(
-        self, distance: float, deceleration: float, any_braking_peer: bool
-    ) -> float:
-        """Bonus for proactive braking before distance becomes unsafe."""
-        if not any_braking_peer:
-            return 0.0
-        if distance <= self.UNSAFE_DIST:
-            return 0.0
-        if abs(deceleration) < self.EARLY_REACTION_DECEL_THRESHOLD:
-            return 0.0
-        return self.REWARD_EARLY_REACTION
-
-    def _ignoring_hazard_penalty(
-        self, distance: float, deceleration: float, any_braking_peer: bool
-    ) -> float:
-        """Penalty for not braking when a peer is braking and close."""
-        if not any_braking_peer:
-            return 0.0
-        if distance > self.IGNORING_HAZARD_DIST_THRESHOLD:
-            return 0.0
-        if abs(deceleration) >= self.IGNORING_HAZARD_DECEL_THRESHOLD:
-            return 0.0
-        return self.PENALTY_IGNORING_HAZARD
-
     def calculate(
         self,
         distance: float,
@@ -141,19 +110,12 @@ class RewardCalculator:
         appropriateness = self._appropriateness_reward(
             distance, deceleration, closing_rate
         )
-        early_reaction = self._early_reaction_bonus(
-            distance, deceleration, any_braking_peer
-        )
-        ignoring_hazard = self._ignoring_hazard_penalty(
-            distance, deceleration, any_braking_peer
-        )
+        # Strategy B+: reward economics intentionally match Run 004 baseline.
+        # Keep legacy fields in info for downstream logging compatibility.
+        early_reaction = 0.0
+        ignoring_hazard = 0.0
 
-        # Zero comfort penalty when braking during a detected hazard.
-        # Braking in response to a braking peer should never be punished.
-        if any_braking_peer and abs(deceleration) >= self.IGNORING_HAZARD_DECEL_THRESHOLD:
-            comfort = 0.0
-
-        total = safety + comfort + appropriateness + early_reaction + ignoring_hazard
+        total = safety + comfort + appropriateness
 
         info = {
             "reward_safety": safety,

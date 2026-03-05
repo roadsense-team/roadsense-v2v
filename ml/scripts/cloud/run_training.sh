@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 006 - User-Data Template
+# RoadSense Training Run 007 - User-Data Template
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,18 +10,17 @@
 #   TOTAL_STEPS   - Training timesteps (default: 10000000)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 006 baseline from Run 005:
-#   - Dataset: dataset_v3/base_real (100% real-grounded, NOT synthetic base)
-#   - Generation: base_real, 25 train + 10 eval, peer_drop_prob=0.4
-#   - NO route randomization (single route in base_real, flags would no-op)
-#   - Eval peer counts enforced via fix_eval_peer_counts.py (n=1-5, 2x each)
-#   - Eval: 200 episodes (20 per scenario, 10 scenarios)
-#   - Architecture: mesh relay + continuous actions + cone filter (all in code)
+# Run 007 Strategy B+ (Baseline Recovery):
+#   - Reward: Reverted to Run 004 economics (Safety/Comfort/Appropriateness)
+#   - V2V Signal: BRAKING_ACCEL_THRESHOLD raised to -3.5 (above Krauss noise)
+#   - Infrastructure: GT collision, Warmup, and 5-dim observation preserved
+#   - Dataset: dataset_v3/base_real (100% real-grounded)
+#   - Eval: 200 episodes (Deterministic Matrix n=1-5)
 # =============================================================================
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_006"
+RUN_ID="cloud_prod_007"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=10000000
 S3_BUCKET="saferide-training-results"

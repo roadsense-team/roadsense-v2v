@@ -146,157 +146,47 @@ def test_reward_calculate_passes_closing_rate():
     assert info["reward_appropriateness"] == -3.0
 
 
-# --- Early reaction bonus tests ---
-
-
-def test_early_reaction_bonus_when_braking_peer_and_safe_distance():
-    """Proactive braking in safe zone with braking peer -> +2.0 bonus."""
-    calc = RewardCalculator()
-    bonus = calc._early_reaction_bonus(
-        distance=20.0, deceleration=1.0, any_braking_peer=True
-    )
-    assert bonus == 2.0
-
-
-def test_early_reaction_no_bonus_without_braking_peer():
-    """No bonus if no braking peer detected."""
-    calc = RewardCalculator()
-    bonus = calc._early_reaction_bonus(
-        distance=20.0, deceleration=1.0, any_braking_peer=False
-    )
-    assert bonus == 0.0
-
-
-def test_early_reaction_no_bonus_when_already_unsafe():
-    """No bonus if already in unsafe zone (<10m) — too late for proactive."""
-    calc = RewardCalculator()
-    bonus = calc._early_reaction_bonus(
-        distance=8.0, deceleration=1.0, any_braking_peer=True
-    )
-    assert bonus == 0.0
-
-
-def test_early_reaction_no_bonus_when_not_braking():
-    """No bonus if model isn't actually braking (decel < threshold)."""
-    calc = RewardCalculator()
-    bonus = calc._early_reaction_bonus(
-        distance=20.0, deceleration=0.2, any_braking_peer=True
-    )
-    assert bonus == 0.0
-
-
-def test_early_reaction_at_decel_threshold():
-    """Decel exactly at threshold (0.5) gets the bonus."""
-    calc = RewardCalculator()
-    bonus = calc._early_reaction_bonus(
-        distance=20.0, deceleration=0.5, any_braking_peer=True
-    )
-    assert bonus == 2.0
-
-
-def test_early_reaction_at_unsafe_boundary():
-    """Distance exactly at UNSAFE_DIST (10m) gets no bonus."""
-    calc = RewardCalculator()
-    bonus = calc._early_reaction_bonus(
-        distance=10.0, deceleration=1.0, any_braking_peer=True
-    )
-    assert bonus == 0.0
-
-
-def test_early_reaction_integrated_in_calculate():
-    """Early reaction bonus flows into total reward via calculate()."""
+def test_reward_calculate_legacy_hazard_fields_are_zero():
+    """Strategy B+: hazard-specific reward terms are disabled."""
     calc = RewardCalculator()
     total, info = calc.calculate(
-        distance=25.0, action_value=0.1, deceleration=1.0,
-        closing_rate=0.0, any_braking_peer=True,
+        distance=25.0,
+        action_value=0.1,
+        deceleration=1.0,
+        closing_rate=0.0,
+        any_braking_peer=True,
     )
-    assert info["reward_early_reaction"] == 2.0
-    # Comfort is zeroed when braking during hazard
-    assert info["reward_comfort"] == 0.0
-    # safety(+1) + comfort(0) + appropriateness(0) + early_reaction(+2) + ignoring(0)
-    assert total == pytest.approx(3.0)
-
-
-# --- Ignoring hazard penalty tests ---
-
-
-def test_ignoring_hazard_penalty_fires_when_not_braking():
-    """Penalty for ignoring braking peer within 30m."""
-    calc = RewardCalculator()
-    penalty = calc._ignoring_hazard_penalty(
-        distance=20.0, deceleration=0.0, any_braking_peer=True
-    )
-    assert penalty == -5.0
-
-
-def test_ignoring_hazard_no_penalty_without_braking_peer():
-    """No penalty if no braking peer."""
-    calc = RewardCalculator()
-    penalty = calc._ignoring_hazard_penalty(
-        distance=20.0, deceleration=0.0, any_braking_peer=False
-    )
-    assert penalty == 0.0
-
-
-def test_ignoring_hazard_no_penalty_when_braking():
-    """No penalty if ego is actually braking."""
-    calc = RewardCalculator()
-    penalty = calc._ignoring_hazard_penalty(
-        distance=20.0, deceleration=1.0, any_braking_peer=True
-    )
-    assert penalty == 0.0
-
-
-def test_ignoring_hazard_no_penalty_when_far():
-    """No penalty if distance > 30m threshold."""
-    calc = RewardCalculator()
-    penalty = calc._ignoring_hazard_penalty(
-        distance=35.0, deceleration=0.0, any_braking_peer=True
-    )
-    assert penalty == 0.0
-
-
-def test_ignoring_hazard_at_distance_threshold():
-    """Penalty fires at exactly 30m."""
-    calc = RewardCalculator()
-    penalty = calc._ignoring_hazard_penalty(
-        distance=30.0, deceleration=0.0, any_braking_peer=True
-    )
-    assert penalty == -5.0
-
-
-def test_comfort_zeroed_during_hazard_braking():
-    """Comfort penalty is zeroed when braking during a detected hazard."""
-    calc = RewardCalculator()
-    # Strong braking (normally -10 comfort) during hazard
-    _, info = calc.calculate(
-        distance=20.0, action_value=0.6, deceleration=5.0,
-        closing_rate=0.0, any_braking_peer=True,
-    )
-    assert info["reward_comfort"] == 0.0
-
-
-def test_comfort_not_zeroed_without_hazard():
-    """Comfort penalty still applies when no braking peer."""
-    calc = RewardCalculator()
-    _, info = calc.calculate(
-        distance=20.0, action_value=0.6, deceleration=5.0,
-        closing_rate=0.0, any_braking_peer=False,
-    )
-    assert info["reward_comfort"] < 0.0
-
-
-def test_ignoring_hazard_integrated_in_calculate():
-    """Ignoring hazard penalty flows into total reward."""
-    calc = RewardCalculator()
-    total, info = calc.calculate(
-        distance=20.0, action_value=0.0, deceleration=0.0,
-        closing_rate=0.0, any_braking_peer=True,
-    )
-    assert info["reward_ignoring_hazard"] == -5.0
+    assert info["reward_early_reaction"] == 0.0
+    assert info["reward_ignoring_hazard"] == 0.0
     expected = (
-        info["reward_safety"] + info["reward_comfort"]
-        + info["reward_appropriateness"] + info["reward_early_reaction"]
-        + info["reward_ignoring_hazard"]
+        info["reward_safety"]
+        + info["reward_comfort"]
+        + info["reward_appropriateness"]
     )
     assert total == pytest.approx(expected)
+
+
+def test_reward_calculate_any_braking_peer_does_not_change_economics():
+    """Braking-peer signal is logging-only and does not alter reward math."""
+    calc = RewardCalculator()
+    total_false, info_false = calc.calculate(
+        distance=22.0,
+        action_value=0.3,
+        deceleration=2.2,
+        closing_rate=0.4,
+        any_braking_peer=False,
+    )
+    total_true, info_true = calc.calculate(
+        distance=22.0,
+        action_value=0.3,
+        deceleration=2.2,
+        closing_rate=0.4,
+        any_braking_peer=True,
+    )
+
+    assert total_true == pytest.approx(total_false)
+    assert info_true["reward_safety"] == pytest.approx(info_false["reward_safety"])
+    assert info_true["reward_comfort"] == pytest.approx(info_false["reward_comfort"])
+    assert info_true["reward_appropriateness"] == pytest.approx(
+        info_false["reward_appropriateness"]
+    )
