@@ -27,10 +27,10 @@ def test_reward_neutral_zone_returns_zero():
     assert reward == 0.0
 
 
-def test_reward_safe_distance_15_to_35m_returns_pos_1():
+def test_reward_safe_distance_15_to_35m_returns_pos_3():
     calc = RewardCalculator()
     reward = calc._safety_reward(distance=25.0)
-    assert reward == 1.0
+    assert reward == 3.0
 
 
 def test_reward_far_distance_returns_pos_half():
@@ -112,8 +112,8 @@ def test_reward_calculate_combines_all_components():
     calc = RewardCalculator()
     total, info = calc.calculate(distance=25.0, action_value=0.0, deceleration=0.2)
 
-    assert total == 1.0
-    assert info["reward_safety"] == 1.0
+    assert total == 3.0
+    assert info["reward_safety"] == 3.0
     assert info["reward_comfort"] == 0.0
     assert info["reward_appropriateness"] == 0.0
     assert info["reward_early_reaction"] == 0.0
@@ -164,6 +164,53 @@ def test_reward_calculate_legacy_hazard_fields_are_zero():
         + info["reward_appropriateness"]
     )
     assert total == pytest.approx(expected)
+
+
+def test_reward_comfort_suppressed_in_unsafe_zone():
+    """Braking in the unsafe zone is correct — comfort penalty must be zero."""
+    calc = RewardCalculator()
+    # Harsh braking at 7m (unsafe) should get zero comfort
+    total, info = calc.calculate(distance=7.0, action_value=0.8, deceleration=6.0)
+    assert info["reward_comfort"] == 0.0
+    assert info["reward_safety"] == -5.0
+    assert total == -5.0  # safety only, no comfort
+
+
+def test_reward_comfort_active_in_neutral_zone():
+    """Comfort penalty must still apply in neutral zone (10-15m)."""
+    calc = RewardCalculator()
+    total, info = calc.calculate(distance=12.0, action_value=0.5, deceleration=4.0)
+    assert info["reward_comfort"] < 0.0
+    assert info["reward_safety"] == 0.0
+
+
+def test_reward_comfort_active_in_safe_zone():
+    """Comfort penalty must still apply in safe zone (15-35m)."""
+    calc = RewardCalculator()
+    total, info = calc.calculate(distance=25.0, action_value=0.5, deceleration=4.0)
+    assert info["reward_comfort"] < 0.0
+    assert info["reward_safety"] == 3.0
+
+
+def test_reward_harsh_brake_penalty_is_neg_5():
+    """PENALTY_HARSH_BRAKE reduced to -5.0 for learnability."""
+    calc = RewardCalculator()
+    penalty = calc._comfort_penalty(deceleration=5.0)
+    assert penalty == pytest.approx(-5.0)
+
+
+def test_reward_unsafe_braking_vs_not_braking():
+    """In unsafe zone, braking must never cost more than not braking."""
+    calc = RewardCalculator()
+    # Not braking while closing (worst case: missed warning)
+    total_no_brake, _ = calc.calculate(
+        distance=7.0, action_value=0.0, deceleration=0.0, closing_rate=2.0
+    )
+    # Hard braking in unsafe zone
+    total_brake, _ = calc.calculate(
+        distance=7.0, action_value=0.8, deceleration=6.0, closing_rate=2.0
+    )
+    assert total_brake >= total_no_brake
 
 
 def test_reward_calculate_any_braking_peer_does_not_change_economics():

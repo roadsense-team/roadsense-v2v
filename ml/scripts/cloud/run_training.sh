@@ -10,9 +10,10 @@
 #   TOTAL_STEPS   - Training timesteps (default: 10000000)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 007 Strategy B+ (Baseline Recovery):
-#   - Reward: Reverted to Run 004 economics (Safety/Comfort/Appropriateness)
-#   - V2V Signal: BRAKING_ACCEL_THRESHOLD raised to -3.5 (above Krauss noise)
+# Run 007.1 Learnability Fix:
+#   - REWARD_SAFE: +1.0 -> +3.0 (stronger pull toward safe zone)
+#   - PENALTY_HARSH_BRAKE: -10.0 -> -5.0 (random policy no longer drowns signal)
+#   - Comfort penalty suppressed in unsafe zone (braking when close is correct)
 #   - Infrastructure: GT collision, Warmup, and 5-dim observation preserved
 #   - Dataset: dataset_v3/base_real (100% real-grounded)
 #   - Eval: 200 episodes (Deterministic Matrix n=1-5)
@@ -20,7 +21,7 @@
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_007"
+RUN_ID="cloud_prod_007_1"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=10000000
 S3_BUCKET="saferide-training-results"
