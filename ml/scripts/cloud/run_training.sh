@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 007 - User-Data Template
+# RoadSense Training Run 007.1 - User-Data Template
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,10 +10,10 @@
 #   TOTAL_STEPS   - Training timesteps (default: 10000000)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 007.1 Learnability Fix:
+# Run 007.1 Economic Stimulus (Claude Fix):
 #   - REWARD_SAFE: +1.0 -> +3.0 (stronger pull toward safe zone)
-#   - PENALTY_HARSH_BRAKE: -10.0 -> -5.0 (random policy no longer drowns signal)
-#   - Comfort penalty suppressed in unsafe zone (braking when close is correct)
+#   - PENALTY_HARSH_BRAKE: -10.0 -> -5.0 (halves the "noise" of random actions)
+#   - Comfort penalty suppressed in unsafe zone (removes contradiction when braking)
 #   - Infrastructure: GT collision, Warmup, and 5-dim observation preserved
 #   - Dataset: dataset_v3/base_real (100% real-grounded)
 #   - Eval: 200 episodes (Deterministic Matrix n=1-5)
@@ -35,8 +35,6 @@ EMULATOR_PARAMS="ml/espnow_emulator/emulator_params_measured.json"
 
 # -------------------------------------------------------------------
 # CLEANUP TRAP: S3 upload + shutdown ALWAYS run, even if training fails
-# Lesson from Run 002: set -euo pipefail killed the script before
-# S3 upload could run. The trap + set +e pattern prevents this.
 # -------------------------------------------------------------------
 cleanup() {
     echo ""
@@ -82,16 +80,12 @@ git remote set-url origin https://github.com/roadsense-team/roadsense-v2v.git
 # Re-fix permissions after pull (git may reset them)
 chmod +x "$WORK_DIR/ml/run_docker.sh"
 
-# 2. Rebuild Docker image if Dockerfile changed (usually instant from cache)
+# 2. Rebuild Docker image if Dockerfile changed
 echo "[2/7] Rebuilding Docker image (cached - should be fast)..."
 cd "$WORK_DIR/ml"
 docker build -t roadsense-ml:latest .
 
 # 3. Generate dataset_v3 from base_real
-#    - 25 train + 10 eval scenarios, 100% real-grounded
-#    - peer_drop_prob=0.4 gives natural n=1-5 distribution in train
-#    - eval_peer_drop_prob=0.0 keeps all peers in eval (fixer trims later)
-#    - NO route randomization flags (single route in base_real, would no-op)
 echo "[3/7] Generating dataset_v3 from base_real..."
 cd "$WORK_DIR"
 ./ml/run_docker.sh generate \
@@ -105,14 +99,13 @@ cd "$WORK_DIR"
     --min_peers 1 \
     --emulator_params "$EMULATOR_PARAMS"
 
-# 4. Enforce deterministic eval peer counts (n=1,2,3,4,5 x 2 each)
-#    This runs fix_eval_peer_counts.py inside Docker via pass-through mode
+# 4. Enforce deterministic eval peer counts
 echo "[4/7] Enforcing eval peer counts (2x each n=1-5)..."
 ./ml/run_docker.sh python3 ml/scripts/fix_eval_peer_counts.py \
     --dataset_dir "$DATASET_DIR" \
     --target_counts 1,1,2,2,3,3,4,4,5,5
 
-# 5. Verify dataset before spending hours on training
+# 5. Verify dataset structure
 echo "[5/7] Verifying dataset structure..."
 ./ml/run_docker.sh python3 -c "
 import json, sys, pathlib
@@ -129,8 +122,7 @@ if len(evl) < 10:
 print('Dataset verification PASSED')
 "
 
-# 6. Train (disable set -e so cleanup trap runs even if training exits non-zero)
-#    200-episode eval: 20 episodes per scenario x 10 eval scenarios
+# 6. Train
 echo "[6/7] Starting training ($TOTAL_STEPS steps)..."
 set +e
 ./ml/run_docker.sh train \
@@ -152,4 +144,3 @@ else
 fi
 
 echo "[7/7] Training done. Cleanup trap will handle S3 upload and shutdown."
-# cleanup() runs automatically via EXIT trap
