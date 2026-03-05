@@ -9,13 +9,13 @@ class RewardCalculator:
     """
     Calculates reward based on safety, comfort, and appropriateness.
 
-    Reward structure:
+    Reward structure (Run 007.1 — Learnability Fix):
     - Collision (<5m): -100
-    - Unsafe proximity (<10m): -5
+    - Unsafe proximity (<10m): -5  (comfort suppressed — braking is correct)
     - Neutral zone (10-15m): 0
-    - Safe following (15-35m): +1
+    - Safe following (15-35m): +3  (strong pull toward safe zone)
     - Far (>35m): +0.5
-    - Comfort penalty scales with deceleration magnitude
+    - Comfort penalty scales with deceleration magnitude (max -5)
     - Unnecessary strong braking at far distance is penalized
     - Missed warning (<10m, closing, no brake) is penalized
     """
@@ -27,14 +27,14 @@ class RewardCalculator:
 
     REWARD_COLLISION = -100.0
     REWARD_UNSAFE = -5.0
-    REWARD_SAFE = 1.0
+    REWARD_SAFE = 3.0
     REWARD_FAR = 0.5
 
     GENTLE_DECEL_THRESHOLD = 0.5
     UNCOMFORTABLE_BRAKE_THRESHOLD = 3.0
     HARSH_BRAKE_THRESHOLD = 4.5
     PENALTY_UNCOMFORTABLE = -2.0
-    PENALTY_HARSH_BRAKE = -10.0
+    PENALTY_HARSH_BRAKE = -5.0
 
     PENALTY_UNNECESSARY_ALERT = -2.0
     PENALTY_UNNECESSARY_MAX_BRAKE = -4.0
@@ -106,7 +106,12 @@ class RewardCalculator:
     ) -> Tuple[float, Dict]:
         """Calculate total reward for current step."""
         safety = self._safety_reward(distance)
-        comfort = self._comfort_penalty(deceleration)
+        # Suppress comfort penalty in unsafe zone: braking is the correct
+        # action when too close, so don't penalise it.
+        if distance < self.UNSAFE_DIST:
+            comfort = 0.0
+        else:
+            comfort = self._comfort_penalty(deceleration)
         appropriateness = self._appropriateness_reward(
             distance, deceleration, closing_rate
         )
