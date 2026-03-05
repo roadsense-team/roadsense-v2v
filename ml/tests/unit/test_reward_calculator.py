@@ -117,6 +117,7 @@ def test_reward_calculate_combines_all_components():
     assert info["reward_comfort"] == 0.0
     assert info["reward_appropriateness"] == 0.0
     assert info["reward_early_reaction"] == 0.0
+    assert info["reward_ignoring_hazard"] == 0.0
 
 
 def test_reward_calculate_returns_info_dict():
@@ -127,6 +128,7 @@ def test_reward_calculate_returns_info_dict():
     assert "reward_comfort" in info
     assert "reward_appropriateness" in info
     assert "reward_early_reaction" in info
+    assert "reward_ignoring_hazard" in info
     assert "reward_total" in info
     assert "distance" in info
     assert "action_value" in info
@@ -209,6 +211,92 @@ def test_early_reaction_integrated_in_calculate():
         closing_rate=0.0, any_braking_peer=True,
     )
     assert info["reward_early_reaction"] == 2.0
-    # safety(+1) + comfort(negative) + appropriateness(0) + early_reaction(+2)
-    expected = info["reward_safety"] + info["reward_comfort"] + info["reward_appropriateness"] + 2.0
+    # Comfort is zeroed when braking during hazard
+    assert info["reward_comfort"] == 0.0
+    # safety(+1) + comfort(0) + appropriateness(0) + early_reaction(+2) + ignoring(0)
+    assert total == pytest.approx(3.0)
+
+
+# --- Ignoring hazard penalty tests ---
+
+
+def test_ignoring_hazard_penalty_fires_when_not_braking():
+    """Penalty for ignoring braking peer within 30m."""
+    calc = RewardCalculator()
+    penalty = calc._ignoring_hazard_penalty(
+        distance=20.0, deceleration=0.0, any_braking_peer=True
+    )
+    assert penalty == -5.0
+
+
+def test_ignoring_hazard_no_penalty_without_braking_peer():
+    """No penalty if no braking peer."""
+    calc = RewardCalculator()
+    penalty = calc._ignoring_hazard_penalty(
+        distance=20.0, deceleration=0.0, any_braking_peer=False
+    )
+    assert penalty == 0.0
+
+
+def test_ignoring_hazard_no_penalty_when_braking():
+    """No penalty if ego is actually braking."""
+    calc = RewardCalculator()
+    penalty = calc._ignoring_hazard_penalty(
+        distance=20.0, deceleration=1.0, any_braking_peer=True
+    )
+    assert penalty == 0.0
+
+
+def test_ignoring_hazard_no_penalty_when_far():
+    """No penalty if distance > 30m threshold."""
+    calc = RewardCalculator()
+    penalty = calc._ignoring_hazard_penalty(
+        distance=35.0, deceleration=0.0, any_braking_peer=True
+    )
+    assert penalty == 0.0
+
+
+def test_ignoring_hazard_at_distance_threshold():
+    """Penalty fires at exactly 30m."""
+    calc = RewardCalculator()
+    penalty = calc._ignoring_hazard_penalty(
+        distance=30.0, deceleration=0.0, any_braking_peer=True
+    )
+    assert penalty == -5.0
+
+
+def test_comfort_zeroed_during_hazard_braking():
+    """Comfort penalty is zeroed when braking during a detected hazard."""
+    calc = RewardCalculator()
+    # Strong braking (normally -10 comfort) during hazard
+    _, info = calc.calculate(
+        distance=20.0, action_value=0.6, deceleration=5.0,
+        closing_rate=0.0, any_braking_peer=True,
+    )
+    assert info["reward_comfort"] == 0.0
+
+
+def test_comfort_not_zeroed_without_hazard():
+    """Comfort penalty still applies when no braking peer."""
+    calc = RewardCalculator()
+    _, info = calc.calculate(
+        distance=20.0, action_value=0.6, deceleration=5.0,
+        closing_rate=0.0, any_braking_peer=False,
+    )
+    assert info["reward_comfort"] < 0.0
+
+
+def test_ignoring_hazard_integrated_in_calculate():
+    """Ignoring hazard penalty flows into total reward."""
+    calc = RewardCalculator()
+    total, info = calc.calculate(
+        distance=20.0, action_value=0.0, deceleration=0.0,
+        closing_rate=0.0, any_braking_peer=True,
+    )
+    assert info["reward_ignoring_hazard"] == -5.0
+    expected = (
+        info["reward_safety"] + info["reward_comfort"]
+        + info["reward_appropriateness"] + info["reward_early_reaction"]
+        + info["reward_ignoring_hazard"]
+    )
     assert total == pytest.approx(expected)

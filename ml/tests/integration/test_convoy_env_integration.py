@@ -71,7 +71,7 @@ def test_full_episode_returns_valid_observations(env):
     obs, _ = env.reset()
 
     assert set(obs.keys()) == {"ego", "peers", "peer_mask"}
-    assert obs["ego"].shape == (4,)
+    assert obs["ego"].shape == (5,)
     assert obs["peers"].shape == (8, 6)
     assert obs["peer_mask"].shape == (8,)
     assert obs["ego"].dtype == np.float32
@@ -82,7 +82,7 @@ def test_full_episode_returns_valid_observations(env):
         action = env.action_space.sample()
         obs, reward, terminated, truncated, info = env.step(action)
 
-        assert obs["ego"].shape == (4,)
+        assert obs["ego"].shape == (5,)
         assert obs["peers"].shape == (8, 6)
         assert obs["peer_mask"].shape == (8,)
         assert np.isfinite(obs["ego"]).all(), "Observation contains NaN or Inf"
@@ -134,7 +134,7 @@ def test_registered_env_has_correct_observation_space(scenario_path):
     try:
         from gymnasium.spaces import Dict as DictSpace
         assert isinstance(env.observation_space, DictSpace)
-        assert env.observation_space["ego"].shape == (4,)
+        assert env.observation_space["ego"].shape == (5,)
         assert env.observation_space["peers"].shape == (8, 6)
         assert env.observation_space["peer_mask"].shape == (8,)
         assert env.observation_space["ego"].dtype == np.float32

@@ -104,8 +104,8 @@ class ConvoyEnv(gym.Env):
 
         self.observation_space = spaces.Dict({
             "ego": spaces.Box(
-                low=np.array([0.0, -1.0, -1.0, 0.0], dtype=np.float32),
-                high=np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+                low=np.array([0.0, -1.0, -1.0, 0.0, -1.0], dtype=np.float32),
+                high=np.array([1.0, 1.0, 1.0, 1.0, 0.0], dtype=np.float32),
                 dtype=np.float32,
             ),
             "peers": spaces.Box(
@@ -175,7 +175,7 @@ class ConvoyEnv(gym.Env):
     ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
         super().reset(seed=seed)
 
-        self.emulator.clear()
+        self.emulator.reset()
 
         self._step_count = 0
 
@@ -211,12 +211,33 @@ class ConvoyEnv(gym.Env):
         # Warmup: let SUMO's CF model stabilize the convoy before RL takes over.
         # Prevents spawn-time collisions when vehicles start too close together.
         WARMUP_STEPS = 30
+        WARMUP_EXTENSION_MAX = 30
+        WARMUP_SAFE_MARGIN = 3.0
         for _ in range(WARMUP_STEPS):
             self.sumo.step()
             if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
                 self.sumo.stop()
                 self._sumo_started = False
                 raise RuntimeError("V001 left simulation during warmup.")
+            # Feed emulator so it has message history when RL starts
+            ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
+            current_time_ms = int(self.sumo.get_simulation_time() * 1000)
+            self._step_espnow(ego_state, current_time_ms)
+
+        # Extend warmup if ground-truth distance is too close
+        ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
+        for _ in range(WARMUP_EXTENSION_MAX):
+            gt_dist = self._calculate_ground_truth_distance(ego_state)
+            if gt_dist > self.COLLISION_DIST + WARMUP_SAFE_MARGIN:
+                break
+            self.sumo.step()
+            if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
+                self.sumo.stop()
+                self._sumo_started = False
+                raise RuntimeError("V001 left simulation during warmup extension.")
+            ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
+            current_time_ms = int(self.sumo.get_simulation_time() * 1000)
+            self._step_espnow(ego_state, current_time_ms)
 
         if self.hazard_injector is not None:
             hazard_options = self._extract_hazard_options(options)
@@ -246,6 +267,21 @@ class ConvoyEnv(gym.Env):
     def step(
         self, action: Any
     ) -> Tuple[Dict[str, np.ndarray], float, bool, bool, Dict[str, Any]]:
+        # Pre-action guard: V001 may have left at end of previous step.
+        # Must check BEFORE any TraCI calls (apply/inject) to avoid crash.
+        if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
+            empty_obs = {
+                "ego": np.zeros(5, dtype=np.float32),
+                "peers": np.zeros((self.MAX_PEERS, 6), dtype=np.float32),
+                "peer_mask": np.zeros(self.MAX_PEERS, dtype=np.float32),
+            }
+            return empty_obs, 0.0, False, True, {
+                "step": self._step_count,
+                "simulation_time": self.sumo.get_simulation_time(),
+                "distance": 1000.0,
+                "truncated_reason": "ego_route_ended",
+            }
+
         action_value = self._parse_action_value(action)
 
         actual_decel = self.action_applicator.apply(self.sumo, action_value)
@@ -260,10 +296,10 @@ class ConvoyEnv(gym.Env):
         self.sumo.step()
         self._step_count += 1
 
-        # V001 may have reached end-of-route — check BEFORE querying state.
+        # Post-step guard: V001 may have left during this sumo.step().
         if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
             empty_obs = {
-                "ego": np.zeros(4, dtype=np.float32),
+                "ego": np.zeros(5, dtype=np.float32),
                 "peers": np.zeros((self.MAX_PEERS, 6), dtype=np.float32),
                 "peer_mask": np.zeros(self.MAX_PEERS, dtype=np.float32),
             }
@@ -287,10 +323,13 @@ class ConvoyEnv(gym.Env):
             ego_state, peer_states
         )
 
+        # Use SUMO ground truth for collision/termination (not GPS-noisy mesh)
+        gt_distance = self._calculate_ground_truth_distance(ego_state)
+
         terminated = False
         truncated = False
 
-        if distance < self.COLLISION_DIST:
+        if gt_distance < self.COLLISION_DIST:
             terminated = True
 
         if self._step_count >= self.max_steps:
@@ -307,10 +346,14 @@ class ConvoyEnv(gym.Env):
         hazard_source_id = None
         hazard_step = None
         hazard_source_rank_ahead = None
+        hazard_injection_attempted = False
+        hazard_injection_failed_reason = None
         if self.hazard_injector is not None:
             hazard_source_id = self.hazard_injector.hazard_target
             hazard_step = self.hazard_injector.hazard_step
             hazard_source_rank_ahead = self.hazard_injector.hazard_source_rank_ahead
+            hazard_injection_attempted = self.hazard_injector.hazard_injection_attempted
+            hazard_injection_failed_reason = self.hazard_injector.hazard_injection_failed_reason
 
         mesh_received_source_ids = sorted(received_map.keys())
 
@@ -322,6 +365,8 @@ class ConvoyEnv(gym.Env):
             "hazard_source_id": hazard_source_id,
             "hazard_step": hazard_step,
             "hazard_source_rank_ahead": hazard_source_rank_ahead,
+            "hazard_injection_attempted": hazard_injection_attempted,
+            "hazard_injection_failed_reason": hazard_injection_failed_reason,
             "mesh_received_source_ids": mesh_received_source_ids,
             "mesh_any_braking_peer_received": any_braking_peer_received,
             **reward_info,
@@ -434,6 +479,26 @@ class ConvoyEnv(gym.Env):
             closing_rate = ego_state.speed - nearest_peer.speed
 
         return min_dist, closing_rate
+
+    def _calculate_ground_truth_distance(self, ego_state: VehicleState) -> float:
+        """
+        Calculate min distance to any active peer using SUMO ground truth.
+
+        Used ONLY for collision/termination check — avoids false collisions
+        from GPS-noisy emulated positions.
+        """
+        active_ids = self.sumo.get_active_vehicle_ids()
+        min_dist = float("inf")
+        for vid in active_ids:
+            if vid == self.EGO_VEHICLE_ID:
+                continue
+            peer_state = self.sumo.get_vehicle_state(vid)
+            dx = peer_state.x - ego_state.x
+            dy = peer_state.y - ego_state.y
+            dist = (dx**2 + dy**2) ** 0.5
+            if dist < min_dist:
+                min_dist = dist
+        return min_dist if min_dist < float("inf") else 1000.0
 
     def _all_vehicles_active(self) -> bool:
         return self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID)
