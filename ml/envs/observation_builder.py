@@ -109,12 +109,19 @@ class ObservationBuilder:
             peer_mask[valid_count] = 1.0
             valid_count += 1
 
+        # Compute min peer accel across valid cone-filtered peers
+        # (most negative = hardest braker). Gives model a clean braking signal.
+        min_peer_accel = 0.0
+        for peer in filtered_peers[:self.MAX_PEERS]:
+            min_peer_accel = min(min_peer_accel, peer["accel"])
+
         ego = np.array(
             [
                 ego_state.speed / self.MAX_SPEED,
                 ego_state.acceleration / self.MAX_ACCEL,
                 ((ego_heading_deg + 180.0) % 360.0 - 180.0) / 180.0,
                 valid_count / self.MAX_PEERS,
+                min_peer_accel / self.MAX_ACCEL,
             ],
             dtype=np.float32,
         )

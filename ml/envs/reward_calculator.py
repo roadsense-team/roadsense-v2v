@@ -45,6 +45,10 @@ class RewardCalculator:
     REWARD_EARLY_REACTION = 2.0
     EARLY_REACTION_DECEL_THRESHOLD = 0.5
 
+    PENALTY_IGNORING_HAZARD = -5.0
+    IGNORING_HAZARD_DIST_THRESHOLD = 30.0
+    IGNORING_HAZARD_DECEL_THRESHOLD = 0.5
+
     def _safety_reward(self, distance: float) -> float:
         """Calculate safety component of reward."""
         if distance < self.COLLISION_DIST:
@@ -111,6 +115,18 @@ class RewardCalculator:
             return 0.0
         return self.REWARD_EARLY_REACTION
 
+    def _ignoring_hazard_penalty(
+        self, distance: float, deceleration: float, any_braking_peer: bool
+    ) -> float:
+        """Penalty for not braking when a peer is braking and close."""
+        if not any_braking_peer:
+            return 0.0
+        if distance > self.IGNORING_HAZARD_DIST_THRESHOLD:
+            return 0.0
+        if abs(deceleration) >= self.IGNORING_HAZARD_DECEL_THRESHOLD:
+            return 0.0
+        return self.PENALTY_IGNORING_HAZARD
+
     def calculate(
         self,
         distance: float,
@@ -128,14 +144,23 @@ class RewardCalculator:
         early_reaction = self._early_reaction_bonus(
             distance, deceleration, any_braking_peer
         )
+        ignoring_hazard = self._ignoring_hazard_penalty(
+            distance, deceleration, any_braking_peer
+        )
 
-        total = safety + comfort + appropriateness + early_reaction
+        # Zero comfort penalty when braking during a detected hazard.
+        # Braking in response to a braking peer should never be punished.
+        if any_braking_peer and abs(deceleration) >= self.IGNORING_HAZARD_DECEL_THRESHOLD:
+            comfort = 0.0
+
+        total = safety + comfort + appropriateness + early_reaction + ignoring_hazard
 
         info = {
             "reward_safety": safety,
             "reward_comfort": comfort,
             "reward_appropriateness": appropriateness,
             "reward_early_reaction": early_reaction,
+            "reward_ignoring_hazard": ignoring_hazard,
             "reward_total": total,
             "distance": distance,
             "action_value": action_value,

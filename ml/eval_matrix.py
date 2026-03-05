@@ -164,7 +164,21 @@ def summarize_deterministic_eval_coverage(
     Compute deterministic eval matrix bucket coverage from episode details.
     """
     observed_counts: Dict[BucketKey, int] = defaultdict(int)
+    injection_attempted = 0
+    injection_succeeded = 0
+    injection_failed = 0
+    injection_failed_reasons: Dict[str, int] = defaultdict(int)
+
     for episode in episodes:
+        if episode.get("hazard_injection_attempted", False):
+            injection_attempted += 1
+            failed_reason = episode.get("hazard_injection_failed_reason")
+            if failed_reason:
+                injection_failed += 1
+                injection_failed_reasons[str(failed_reason)] += 1
+            else:
+                injection_succeeded += 1
+
         if episode.get("hazard_step") is None:
             continue
         peer_count = episode.get("peer_count")
@@ -205,4 +219,8 @@ def summarize_deterministic_eval_coverage(
         "expected_counts": expected_serialized,
         "observed_counts": observed_serialized,
         "missing_buckets": missing,
+        "injection_attempted": injection_attempted,
+        "injection_succeeded": injection_succeeded,
+        "injection_failed": injection_failed,
+        "injection_failed_reasons": dict(injection_failed_reasons),
     }

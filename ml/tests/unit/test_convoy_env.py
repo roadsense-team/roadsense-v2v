@@ -104,11 +104,13 @@ def mock_sumo():
     mock.stop = Mock()
     mock.step = Mock()
     mock.set_vehicle_speed = Mock()
+    mock.release_vehicle_speed = Mock()
     mock.get_simulation_time = Mock(return_value=0.0)
     mock.is_vehicle_active = Mock(return_value=True)
     mock.get_vehicle_state = Mock(
         return_value=_make_state("V001", x=0.0, y=0.0)
     )
+    mock.get_active_vehicle_ids = Mock(return_value=["V001", "V002", "V003"])
     mock.set_config = Mock()
     return mock
 
@@ -117,6 +119,7 @@ def mock_sumo():
 def mock_emulator():
     """Mock ESPNOWEmulator for unit tests."""
     mock = Mock()
+    mock.reset = Mock()
     mock.clear = Mock()
     mock.simulate_mesh_step = Mock(return_value={})
     return mock
@@ -269,7 +272,7 @@ def test_reset_observation_shape_is_dict(env_with_mocks):
     obs, _ = env_with_mocks.reset()
 
     assert set(obs.keys()) == {"ego", "peers", "peer_mask"}
-    assert obs["ego"].shape == (4,)
+    assert obs["ego"].shape == (5,)
     assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
     assert obs["peer_mask"].shape == (ObservationBuilder.MAX_PEERS,)
     assert obs["ego"].dtype == np.float32
@@ -281,7 +284,7 @@ def test_reset_clears_emulator_message_queue(env_with_mocks, mock_emulator):
     """No stale messages from previous episode."""
     env_with_mocks.reset()
 
-    mock_emulator.clear.assert_called_once()
+    mock_emulator.reset.assert_called_once()
 
 
 def test_reset_restarts_sumo_simulation(env_with_mocks, mock_sumo):
@@ -295,15 +298,18 @@ def test_reset_restarts_sumo_simulation(env_with_mocks, mock_sumo):
 
 
 def test_reset_waits_for_ego_spawn(env_with_mocks, mock_sumo):
-    """reset() steps until V001 is active, then runs 30-step warmup."""
+    """reset() steps until V001 is active, then runs warmup."""
+    # Need enough True returns: 2 startup steps fail, then spawn,
+    # then 30 warmup steps (each checks active), then warmup extension
+    # checks, then final _step_espnow.
     mock_sumo.is_vehicle_active = Mock(
-        side_effect=[False, False] + [True] * 31,
+        side_effect=[False, False] + [True] * 200,
     )
 
     env_with_mocks.reset()
 
-    # 2 startup steps + 30 warmup steps = 32
-    assert mock_sumo.step.call_count == 32
+    # 2 startup steps + 30 warmup steps = 32 minimum
+    assert mock_sumo.step.call_count >= 32
 
 
 def test_reset_times_out_when_ego_missing(tmp_path, mock_emulator):
@@ -319,6 +325,7 @@ def test_reset_times_out_when_ego_missing(tmp_path, mock_emulator):
         mock_sumo.step = Mock()
         mock_sumo.get_simulation_time = Mock(return_value=0.0)
         mock_sumo.is_vehicle_active = Mock(return_value=False)
+        mock_sumo.get_active_vehicle_ids = Mock(return_value=[])
         mock_sumo_class.return_value = mock_sumo
 
         env = ConvoyEnv(
@@ -350,6 +357,7 @@ def test_reset_with_seed_is_reproducible(tmp_path, mock_emulator):
         mock_sumo.get_vehicle_state = Mock(
             return_value=_make_state("V001", x=0.0, y=0.0)
         )
+        mock_sumo.get_active_vehicle_ids = Mock(return_value=["V001"])
         mock_sumo_class.return_value = mock_sumo
 
         env = ConvoyEnv(
@@ -370,7 +378,7 @@ def test_reset_with_seed_is_reproducible(tmp_path, mock_emulator):
 
 
 def test_collision_sets_terminated_true(env_with_mocks, mock_sumo, mock_emulator):
-    """Distance < 5m -> terminated=True."""
+    """Ground-truth distance < 5m -> terminated=True."""
     env_with_mocks.reset()
 
     states = {
@@ -379,6 +387,7 @@ def test_collision_sets_terminated_true(env_with_mocks, mock_sumo, mock_emulator
         "V003": _make_state("V003", x=100.0, y=0.0),
     }
     _set_states(mock_sumo, states)
+    mock_sumo.get_active_vehicle_ids.return_value = ["V001", "V002", "V003"]
     mock_emulator.simulate_mesh_step.return_value = {
         "V002": _make_received_message("V002", x=4.0, y=0.0, age_ms=10, hop_count=0),
     }
@@ -390,7 +399,7 @@ def test_collision_sets_terminated_true(env_with_mocks, mock_sumo, mock_emulator
 
 
 def test_collision_reward_is_negative_100(env_with_mocks, mock_sumo, mock_emulator):
-    """Collision step reward is -100."""
+    """Collision step reward is -100 (mesh distance also close)."""
     env_with_mocks.reset()
 
     states = {
@@ -399,6 +408,7 @@ def test_collision_reward_is_negative_100(env_with_mocks, mock_sumo, mock_emulat
         "V003": _make_state("V003", x=100.0, y=0.0),
     }
     _set_states(mock_sumo, states)
+    mock_sumo.get_active_vehicle_ids.return_value = ["V001", "V002", "V003"]
     mock_emulator.simulate_mesh_step.return_value = {
         "V002": _make_received_message("V002", x=3.0, y=0.0, age_ms=10, hop_count=0),
     }
@@ -409,7 +419,7 @@ def test_collision_reward_is_negative_100(env_with_mocks, mock_sumo, mock_emulat
 
 
 def test_no_collision_terminated_is_false(env_with_mocks, mock_sumo):
-    """Normal step (safe distance) -> terminated=False."""
+    """Normal step (safe ground-truth distance) -> terminated=False."""
     env_with_mocks.reset()
 
     states = {
@@ -418,6 +428,7 @@ def test_no_collision_terminated_is_false(env_with_mocks, mock_sumo):
         "V003": _make_state("V003", x=60.0, y=0.0),
     }
     _set_states(mock_sumo, states)
+    mock_sumo.get_active_vehicle_ids.return_value = ["V001", "V002", "V003"]
 
     _, _, terminated, _, _ = env_with_mocks.step(0)
 
@@ -425,15 +436,16 @@ def test_no_collision_terminated_is_false(env_with_mocks, mock_sumo):
 
 
 def test_reward_distance_defaults_far_when_no_mesh_reception(env_with_mocks, mock_sumo, mock_emulator):
-    """Ground-truth close peers should not penalize reward if mesh sees nobody."""
+    """Reward uses mesh distance (far) when mesh sees nobody, even if GT is closer."""
     env_with_mocks.reset()
 
     states = {
         "V001": _make_state("V001", x=0.0, y=0.0, speed=12.0),
-        "V002": _make_state("V002", x=3.0, y=0.0, speed=0.0),
-        "V003": _make_state("V003", x=6.0, y=0.0, speed=0.0),
+        "V002": _make_state("V002", x=20.0, y=0.0, speed=8.0),
+        "V003": _make_state("V003", x=40.0, y=0.0, speed=8.0),
     }
     _set_states(mock_sumo, states)
+    mock_sumo.get_active_vehicle_ids.return_value = ["V001", "V002", "V003"]
     mock_emulator.simulate_mesh_step.return_value = {}
 
     _, _, terminated, _, info = env_with_mocks.step(np.array([0.2], dtype=np.float32))
@@ -457,6 +469,7 @@ def test_reward_penalty_when_mesh_visible_peer_is_close(
         "V003": _make_state("V003", x=120.0, y=0.0, speed=8.0),
     }
     _set_states(mock_sumo, states)
+    mock_sumo.get_active_vehicle_ids.return_value = ["V001", "V002", "V003"]
     mock_emulator.simulate_mesh_step.return_value = {
         "V002": _make_received_message("V002", x=7.0, y=0.0, age_ms=10, hop_count=0),
     }
@@ -473,7 +486,7 @@ def test_reward_distance_uses_mesh_visible_peers_not_ground_truth(
     mock_sumo,
     mock_emulator,
 ):
-    """Reward distance must come from mesh-visible peers only."""
+    """Reward distance must come from mesh-visible peers only (GT is far)."""
     env_with_mocks.reset()
 
     states = {
@@ -482,12 +495,15 @@ def test_reward_distance_uses_mesh_visible_peers_not_ground_truth(
         "V003": _make_state("V003", x=160.0, y=0.0, speed=8.0),
     }
     _set_states(mock_sumo, states)
+    mock_sumo.get_active_vehicle_ids.return_value = ["V001", "V002", "V003"]
     mock_emulator.simulate_mesh_step.return_value = {
         "V002": _make_received_message("V002", x=6.0, y=0.0, age_ms=20, hop_count=0),
     }
 
-    _, _, _, _, info = env_with_mocks.step(np.array([0.2], dtype=np.float32))
+    _, _, terminated, _, info = env_with_mocks.step(np.array([0.2], dtype=np.float32))
 
+    # GT distance is 120m (no collision), but mesh shows 6m (unsafe reward)
+    assert terminated is False
     assert info["distance"] == pytest.approx(6.0, abs=1e-3)
     assert info["reward_safety"] == pytest.approx(-5.0)
 
@@ -502,6 +518,7 @@ def test_max_steps_sets_truncated_true(env_with_mocks, mock_sumo):
         return _make_state(vid, x=x, y=0.0)
 
     mock_sumo.get_vehicle_state = Mock(side_effect=make_state)
+    mock_sumo.get_active_vehicle_ids.return_value = ["V001", "V002", "V003"]
 
     truncated = False
     for i in range(10):
@@ -524,7 +541,7 @@ def test_ego_exit_sets_truncated_true(env_with_mocks, mock_sumo):
     assert truncated is True
     assert terminated is False
     assert reward == 0.0
-    assert obs["ego"].shape == (4,)
+    assert obs["ego"].shape == (5,)
     assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
     assert info.get("truncated_reason") == "ego_route_ended"
 
@@ -539,6 +556,7 @@ def test_truncated_does_not_apply_collision_reward(env_with_mocks, mock_sumo):
         return _make_state(vid, x=x, y=0.0)
 
     mock_sumo.get_vehicle_state = Mock(side_effect=make_state)
+    mock_sumo.get_active_vehicle_ids.return_value = ["V001", "V002", "V003"]
 
     _, _, terminated, truncated, info = env_with_mocks.step(0)
 
@@ -553,6 +571,7 @@ class TestConvoyEnvDataset:
     def test_init_with_dataset_dir(self, tmp_path, mock_emulator, mock_sumo):
         dataset_dir = tmp_path / "dataset"
         _make_dataset_dir(dataset_dir)
+        mock_sumo.get_active_vehicle_ids = Mock(return_value=["V001"])
 
         with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
              patch("traci.vehicle.getIDList", return_value=["V001"]):
@@ -583,6 +602,7 @@ class TestConvoyEnvDataset:
     def test_reset_switches_scenario(self, tmp_path, mock_emulator, mock_sumo):
         dataset_dir = tmp_path / "dataset"
         _make_dataset_dir(dataset_dir)
+        mock_sumo.get_active_vehicle_ids = Mock(return_value=["V001"])
 
         with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
              patch("traci.vehicle.getIDList", return_value=["V001"]):
@@ -606,6 +626,7 @@ class TestConvoyEnvDataset:
     def test_reset_returns_scenario_id(self, tmp_path, mock_emulator, mock_sumo):
         dataset_dir = tmp_path / "dataset"
         _make_dataset_dir(dataset_dir)
+        mock_sumo.get_active_vehicle_ids = Mock(return_value=["V001"])
 
         with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
              patch("traci.vehicle.getIDList", return_value=["V001"]):
@@ -624,6 +645,7 @@ class TestConvoyEnvDataset:
     def test_backward_compatible_sumo_cfg(self, tmp_path, mock_emulator, mock_sumo):
         cfg = tmp_path / "single.sumocfg"
         cfg.write_text("<configuration></configuration>")
+        mock_sumo.get_active_vehicle_ids = Mock(return_value=["V001"])
 
         with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
              patch("traci.vehicle.getIDList", return_value=["V001"]):

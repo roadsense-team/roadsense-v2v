@@ -106,6 +106,9 @@ class HazardInjector:
         self._hazard_injected = False
         self._hazard_target = None
         self._hazard_source_rank_ahead = None
+        self._hazard_injection_attempted = False
+        self._hazard_injection_failed = False
+        self._hazard_injection_failed_reason: Optional[str] = None
 
     def reset(self, options: Optional[Dict[str, Any]] = None) -> None:
         self._reset_state(options=options)
@@ -182,9 +185,18 @@ class HazardInjector:
         if self._hazard_step is None or step != self._hazard_step:
             return False
 
+        self._hazard_injection_attempted = True
+
         front_peers_with_rank = self._front_peers_with_rank(sumo)
         target, source_rank_ahead = self._select_target(front_peers_with_rank)
         if target is None or source_rank_ahead is None:
+            self._hazard_injection_failed = True
+            if not front_peers_with_rank:
+                self._hazard_injection_failed_reason = "no_front_peers"
+            else:
+                self._hazard_injection_failed_reason = (
+                    f"target_not_found_strategy={self._target_strategy}"
+                )
             return False
 
         sumo.set_vehicle_speed(target, 0.0)
@@ -212,6 +224,18 @@ class HazardInjector:
     @property
     def hazard_source_rank_ahead(self) -> Optional[int]:
         return self._hazard_source_rank_ahead
+
+    @property
+    def hazard_injection_attempted(self) -> bool:
+        return self._hazard_injection_attempted
+
+    @property
+    def hazard_injection_failed(self) -> bool:
+        return self._hazard_injection_failed
+
+    @property
+    def hazard_injection_failed_reason(self) -> Optional[str]:
+        return self._hazard_injection_failed_reason
 
     @property
     def target_strategy(self) -> str:

@@ -29,14 +29,17 @@ def _make_mock_sumo(state_map: dict) -> Mock:
     mock.stop = Mock()
     mock.step = Mock()
     mock.set_vehicle_speed = Mock()
+    mock.release_vehicle_speed = Mock()
     mock.get_simulation_time = Mock(return_value=0.0)
     mock.is_vehicle_active = Mock(return_value=True)
     mock.get_vehicle_state = Mock(side_effect=lambda vid: state_map[vid])
+    mock.get_active_vehicle_ids = Mock(return_value=list(state_map.keys()))
     return mock
 
 
 def _make_mock_emulator() -> Mock:
     mock = Mock()
+    mock.reset = Mock()
     mock.clear = Mock()
 
     def _simulate_mesh_step(vehicle_states, ego_id, current_time_ms):

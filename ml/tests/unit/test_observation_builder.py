@@ -50,7 +50,7 @@ def test_build_observation_returns_dict_shapes():
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
     assert isinstance(result, dict)
-    assert result["ego"].shape == (4,)
+    assert result["ego"].shape == (5,)
     assert result["peers"].shape == (builder.MAX_PEERS, 6)
     assert result["peer_mask"].shape == (builder.MAX_PEERS,)
 
@@ -120,6 +120,7 @@ def test_build_observation_zero_peers_is_well_formed():
     assert np.all(result["peers"] == 0.0)
     assert np.isfinite(result["ego"]).all()
     assert result["ego"][3] == pytest.approx(0.0)  # peer_count/MAX_PEERS = 0
+    assert result["ego"][4] == pytest.approx(0.0)  # min_peer_accel = 0 when no peers
 
 
 def test_build_observation_peers_behind_ego_filtered_by_cone():
@@ -132,6 +133,38 @@ def test_build_observation_peers_behind_ego_filtered_by_cone():
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
     assert result["peer_mask"].sum() == pytest.approx(0.0)
+
+
+def test_build_observation_min_peer_accel_reflects_braking():
+    """min_peer_accel in ego vector reflects the most negative peer accel."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state(heading=0.0)
+    # Two peers ahead, one braking hard
+    peers = [
+        _make_peer_obs(0.0, 10.0, accel=-3.0, valid=True),
+        _make_peer_obs(0.0, 20.0, accel=-7.0, valid=True),
+    ]
+
+    result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
+
+    # min_peer_accel = -7.0, normalized by MAX_ACCEL=10 -> -0.7
+    assert result["ego"][4] == pytest.approx(-0.7)
+
+
+def test_build_observation_min_peer_accel_ignores_behind():
+    """min_peer_accel only considers cone-filtered (forward) peers."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state(heading=0.0)  # Facing North
+    # One peer behind braking hard, one ahead not braking
+    peers = [
+        _make_peer_obs(0.0, -50.0, accel=-8.0, valid=True),  # behind
+        _make_peer_obs(0.0, 20.0, accel=-1.0, valid=True),   # ahead
+    ]
+
+    result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
+
+    # Behind peer filtered by cone, only ahead peer counted
+    assert result["ego"][4] == pytest.approx(-0.1)
 
 
 def test_build_observation_all_stale_peers_excluded():
