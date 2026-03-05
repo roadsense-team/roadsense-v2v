@@ -43,15 +43,17 @@ def _make_received_message(
     age_ms: int,
     hop_count: int,
     timestamp_ms: int = 1000,
+    speed: float = 15.0,
+    accel_x: float = 0.0,
 ) -> ReceivedMessage:
     meters_per_deg = 111000.0
     msg = V2VMessage(
         vehicle_id=source_id,
         lat=y / meters_per_deg,
         lon=x / meters_per_deg,
-        speed=15.0,
+        speed=speed,
         heading=0.0,
-        accel_x=0.0,
+        accel_x=accel_x,
         accel_y=0.0,
         accel_z=9.81,
         gyro_x=0.0,
@@ -257,6 +259,97 @@ def test_convoy_env_hop_count_reflected_in_message_age(
 
     expected_age_norm = 14.0 / ObservationBuilder.STALENESS_THRESHOLD
     assert obs["peers"][0][5] == pytest.approx(expected_age_norm)
+
+
+def test_convoy_env_any_braking_peer_uses_hard_brake_threshold(
+    env_with_mocks,
+    mock_sumo,
+    mock_emulator,
+):
+    """Mild decel should not be counted as braking-peer signal."""
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0),
+        "V002": _make_state("V002", x=0.0, y=20.0),
+        "V003": _make_state("V003", x=0.0, y=40.0),
+    }
+    _set_states(mock_sumo, states)
+    mock_emulator.simulate_mesh_step.return_value = {
+        "V002": _make_received_message(
+            "V002",
+            x=0.0,
+            y=20.0,
+            age_ms=10,
+            hop_count=0,
+            accel_x=-1.2,
+        ),
+    }
+
+    _, _, _, any_braking_peer = env_with_mocks._step_espnow(
+        states["V001"],
+        current_time_ms=1000,
+    )
+    assert any_braking_peer is False
+
+
+def test_convoy_env_any_braking_peer_detects_hard_brake(
+    env_with_mocks,
+    mock_sumo,
+    mock_emulator,
+):
+    """Hard decel should be counted as braking-peer signal."""
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0),
+        "V002": _make_state("V002", x=0.0, y=20.0),
+        "V003": _make_state("V003", x=0.0, y=40.0),
+    }
+    _set_states(mock_sumo, states)
+    mock_emulator.simulate_mesh_step.return_value = {
+        "V002": _make_received_message(
+            "V002",
+            x=0.0,
+            y=20.0,
+            age_ms=10,
+            hop_count=0,
+            accel_x=-4.2,
+        ),
+    }
+
+    _, _, _, any_braking_peer = env_with_mocks._step_espnow(
+        states["V001"],
+        current_time_ms=1000,
+    )
+    assert any_braking_peer is True
+
+
+def test_convoy_env_any_braking_peer_not_triggered_by_low_speed_only(
+    env_with_mocks,
+    mock_sumo,
+    mock_emulator,
+):
+    """Low speed alone should not be treated as braking-peer hazard."""
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0),
+        "V002": _make_state("V002", x=0.0, y=20.0),
+        "V003": _make_state("V003", x=0.0, y=40.0),
+    }
+    _set_states(mock_sumo, states)
+    mock_emulator.simulate_mesh_step.return_value = {
+        "V002": _make_received_message(
+            "V002",
+            x=0.0,
+            y=20.0,
+            age_ms=10,
+            hop_count=0,
+            speed=0.05,
+            accel_x=0.0,
+        ),
+    }
+
+    _, _, _, any_braking_peer = env_with_mocks._step_espnow(
+        states["V001"],
+        current_time_ms=1000,
+    )
+    assert any_braking_peer is False
 
 
 def test_step_accepts_float_action(env_with_mocks):

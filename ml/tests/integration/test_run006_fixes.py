@@ -178,19 +178,17 @@ def test_braking_peer_in_observation(make_env):
     )
 
 
-# --- Test 5: Ignoring-hazard penalty fires ---
+# --- Test 5: Strategy B+ disables hazard-specific reward shaping ---
 
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.skipif(not SUMO_AVAILABLE, reason="SUMO not installed")
-def test_hazard_penalty_fires(make_env):
+def test_hazard_reward_terms_disabled(make_env):
     """
-    When hazard is injected and ego does NOT brake (action=0),
-    reward_ignoring_hazard should be < 0 at some point.
+    Strategy B+ restores Run 004 reward economics.
+    Even during hazard episodes, hazard-specific reward components remain zero.
     """
     env = make_env(max_steps=200)
-
-    penalty_fired = False
 
     for ep in range(30):
         obs, info = env.reset(seed=ep, options={
@@ -202,20 +200,11 @@ def test_hazard_penalty_fires(make_env):
                 np.array([0.0], dtype=np.float32)  # No braking
             )
 
-            if step_info.get("reward_ignoring_hazard", 0.0) < 0:
-                penalty_fired = True
-                break
+            assert step_info.get("reward_early_reaction", 0.0) == pytest.approx(0.0)
+            assert step_info.get("reward_ignoring_hazard", 0.0) == pytest.approx(0.0)
 
             if terminated or truncated:
                 break
-
-        if penalty_fired:
-            break
-
-    assert penalty_fired, (
-        "PENALTY_IGNORING_HAZARD never fired during hazard episodes. "
-        "The reward restructure is not working."
-    )
 
 
 # --- Test 6: Eval matrix coverage with small run ---
