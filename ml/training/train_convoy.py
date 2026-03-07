@@ -91,20 +91,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=3e-4,
-        help="Learning rate (default: 3e-4).",
+        default=1e-4,
+        help="Learning rate (default: 1e-4).",
     )
     parser.add_argument(
         "--n_steps",
         type=int,
-        default=2048,
-        help="Steps per rollout (default: 2048).",
+        default=4096,
+        help="Steps per rollout (default: 4096).",
     )
     parser.add_argument(
         "--ent_coef",
         type=float,
-        default=0.01,
-        help="Entropy coefficient (default: 0.01).",
+        default=0.0,
+        help="Entropy coefficient (default: 0.0). With log_std_init=-0.5 the learnable "
+        "std already provides exploration; ent_coef>0 fights convergence in late training.",
     )
 
     # Output

@@ -545,7 +545,7 @@ def test_reward_distance_defaults_far_when_no_mesh_reception(env_with_mocks, moc
 
     assert terminated is False
     assert info["distance"] == pytest.approx(1000.0)
-    assert info["reward_safety"] == pytest.approx(-1.0)
+    assert info["reward_safety"] == pytest.approx(-2.0)
 
 
 def test_reward_penalty_when_mesh_visible_peer_is_close(
@@ -571,8 +571,8 @@ def test_reward_penalty_when_mesh_visible_peer_is_close(
 
     assert terminated is False
     assert info["distance"] == pytest.approx(7.0, abs=1e-3)
-    # Ramp: -5 + 8*(2/15) = -3.933
-    assert info["reward_safety"] == pytest.approx(-3.933, abs=0.01)
+    # Ramp: -5 + 9*(2/15) = -3.8
+    assert info["reward_safety"] == pytest.approx(-3.8, abs=0.01)
 
 
 def test_reward_distance_uses_mesh_visible_peers_not_ground_truth(
@@ -599,8 +599,8 @@ def test_reward_distance_uses_mesh_visible_peers_not_ground_truth(
     # GT distance is 120m (no collision), but mesh shows 6m (unsafe reward)
     assert terminated is False
     assert info["distance"] == pytest.approx(6.0, abs=1e-3)
-    # Ramp: -5 + 8*(1/15) = -4.467
-    assert info["reward_safety"] == pytest.approx(-4.467, abs=0.01)
+    # Ramp: -5 + 9*(1/15) = -4.4
+    assert info["reward_safety"] == pytest.approx(-4.4, abs=0.01)
 
 
 def test_max_steps_sets_truncated_true(env_with_mocks, mock_sumo):

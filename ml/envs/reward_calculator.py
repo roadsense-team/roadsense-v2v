@@ -1,9 +1,10 @@
 """
 Reward calculation utilities for ConvoyEnv.
 
-Run 008 — Linear Ramp reward (Grok-style fix for poverty trap).
+Run 009 — Linear Ramp + Active V2V incentive.
 Replaces discrete zone boundaries with a continuous gradient from 5m to 20m,
 plus distance-scaled comfort suppression so braking is cheap when it matters.
+Steeper ramp (+9 span) and harsher far penalty make active braking beat passive CF.
 """
 
 from typing import Dict, Tuple
@@ -13,11 +14,11 @@ class RewardCalculator:
     """
     Calculates reward based on safety, comfort, and appropriateness.
 
-    Reward structure (Run 008 — Linear Ramp):
+    Reward structure (Run 009 — Linear Ramp + Active V2V):
     - Collision (<5m): -100 (terminal)
-    - Ramp zone (5-20m): linear from -5 to +3 (continuous gradient)
-    - Safe following (20-35m): +3 (plateau)
-    - Far (>35m): -1 (anti-laziness)
+    - Ramp zone (5-20m): linear from -5 to +4 (steeper gradient)
+    - Safe following (20-35m): +4 (plateau)
+    - Far (>35m): -2 (stronger anti-laziness)
     - Comfort penalty scales with decel, graduated by distance (min mult 0.1)
     - Missed warning (<10m, closing, no brake) penalized
     """
@@ -27,12 +28,12 @@ class RewardCalculator:
     SAFE_DIST_MAX = 35.0
 
     RAMP_LOW = -5.0
-    RAMP_HIGH = 3.0
-    RAMP_SPAN = RAMP_HIGH - RAMP_LOW  # 8.0
+    RAMP_HIGH = 4.0
+    RAMP_SPAN = RAMP_HIGH - RAMP_LOW  # 9.0
 
     REWARD_COLLISION = -100.0
-    REWARD_SAFE = 3.0
-    REWARD_FAR = -1.0
+    REWARD_SAFE = 4.0
+    REWARD_FAR = -2.0
 
     COMFORT_MIN_MULTIPLIER = 0.1
 

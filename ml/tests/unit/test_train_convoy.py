@@ -74,7 +74,7 @@ def _make_args(**overrides):
         total_timesteps=100,
         learning_rate=1e-4,
         n_steps=32,
-        ent_coef=0.01,
+        ent_coef=0.0,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -126,9 +126,9 @@ def test_parse_args_defaults(monkeypatch):
     assert args.emulator_params is None
     assert args.seed == 42
     assert args.total_timesteps == 100_000
-    assert args.learning_rate == 3e-4
-    assert args.n_steps == 2048
-    assert args.ent_coef == 0.01
+    assert args.learning_rate == 1e-4
+    assert args.n_steps == 4096
+    assert args.ent_coef == 0.0
     assert args.output_dir is None
     assert args.run_id is None
     assert args.skip_eval is False
