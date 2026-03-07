@@ -662,6 +662,8 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
             hazard_source_id = None
             hazard_source_rank_ahead = None
             hazard_injected = False
+            hazard_injection_attempted = False
+            hazard_injection_failed_reason = None
             hazard_message_received_by_ego = False
             hazard_any_braking_peer_received = False
             reaction_detected = False
@@ -680,6 +682,12 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
                 distance = float(info.get("distance", 1000.0))
                 if distance < UNSAFE_DIST_THRESHOLD_M:
                     unsafe_steps += 1
+
+                if info.get("hazard_injection_attempted", False):
+                    hazard_injection_attempted = True
+                    hazard_injection_failed_reason = info.get(
+                        "hazard_injection_failed_reason"
+                    )
 
                 if info.get("hazard_injected", False):
                     hazard_injected = True
@@ -754,6 +762,8 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
                     "hazard_source_id": hazard_source_id,
                     "hazard_step": hazard_step,
                     "hazard_source_rank_ahead": hazard_source_rank_ahead,
+                    "hazard_injection_attempted": bool(hazard_injection_attempted),
+                    "hazard_injection_failed_reason": hazard_injection_failed_reason,
                     "hazard_message_received_by_ego": bool(hazard_message_received_by_ego),
                     "hazard_any_braking_peer_received": bool(hazard_any_braking_peer_received),
                     "reaction_detected": bool(reaction_detected),

@@ -31,6 +31,7 @@ class ConvoyEnv(gym.Env):
     COLLISION_DIST = 5.0
     MAX_STARTUP_STEPS = 100
     BRAKING_ACCEL_THRESHOLD = -3.5
+    CF_OVERRIDE_GRACE_STEPS = 3
 
     def __init__(
         self,
@@ -100,6 +101,8 @@ class ConvoyEnv(gym.Env):
 
         self._step_count = 0
         self._sumo_started = False
+        self._hazard_injection_step: Optional[int] = None
+        self._cf_override_active = False
 
         self.observation_space = spaces.Dict({
             "ego": spaces.Box(
@@ -177,6 +180,8 @@ class ConvoyEnv(gym.Env):
         self.emulator.reset()
 
         self._step_count = 0
+        self._hazard_injection_step = None
+        self._cf_override_active = False
 
         scenario_id = None
         if self.scenario_manager is not None:
@@ -283,7 +288,19 @@ class ConvoyEnv(gym.Env):
 
         action_value = self._parse_action_value(action)
 
-        actual_decel = self.action_applicator.apply(self.sumo, action_value)
+        # Activate CF override after grace period following hazard injection.
+        # This forces the RL model to be the sole source of deceleration —
+        # the SUMO CF model cannot brake for free during hazard events.
+        if (
+            self._hazard_injection_step is not None
+            and not self._cf_override_active
+            and self._step_count >= self._hazard_injection_step + self.CF_OVERRIDE_GRACE_STEPS
+        ):
+            self._cf_override_active = True
+
+        actual_decel = self.action_applicator.apply(
+            self.sumo, action_value, cf_override=self._cf_override_active
+        )
 
         hazard_injected = False
         if self.hazard_injector is not None:
@@ -291,6 +308,8 @@ class ConvoyEnv(gym.Env):
                 step=self._step_count,
                 sumo=self.sumo,
             )
+            if hazard_injected and self._hazard_injection_step is None:
+                self._hazard_injection_step = self._step_count
 
         self.sumo.step()
         self._step_count += 1

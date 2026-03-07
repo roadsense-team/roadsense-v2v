@@ -153,3 +153,51 @@ def test_action_applicator_decel_at_full_action():
     applicator.apply(mock_sumo, 1.0)
 
     mock_sumo.set_vehicle_speed.assert_called_once_with("V001", pytest.approx(19.2))
+
+
+def test_cf_override_zero_action_holds_speed():
+    """With cf_override, action=0 holds current speed instead of releasing to CF."""
+    applicator = ActionApplicator()
+    mock_sumo = _make_sumo(20.0)
+
+    actual_decel = applicator.apply(mock_sumo, 0.0, cf_override=True)
+
+    mock_sumo.release_vehicle_speed.assert_not_called()
+    mock_sumo.set_vehicle_speed.assert_called_once_with("V001", 20.0)
+    assert actual_decel == pytest.approx(0.0)
+
+
+def test_cf_override_below_threshold_holds_speed():
+    """With cf_override, action below threshold holds speed."""
+    applicator = ActionApplicator()
+    mock_sumo = _make_sumo(15.0)
+
+    actual_decel = applicator.apply(mock_sumo, 0.01, cf_override=True)
+
+    mock_sumo.release_vehicle_speed.assert_not_called()
+    mock_sumo.set_vehicle_speed.assert_called_once_with("V001", 15.0)
+    assert actual_decel == pytest.approx(0.0)
+
+
+def test_cf_override_braking_still_works():
+    """With cf_override, braking actions still apply deceleration normally."""
+    applicator = ActionApplicator()
+    mock_sumo = _make_sumo(20.0)
+
+    actual_decel = applicator.apply(mock_sumo, 0.5, cf_override=True)
+
+    expected_decel = 0.5 * applicator.MAX_DECEL
+    expected_new_speed = 20.0 - (expected_decel * applicator.STEP_DT)
+    mock_sumo.set_vehicle_speed.assert_called_once_with("V001", expected_new_speed)
+    assert actual_decel == pytest.approx(expected_decel)
+
+
+def test_cf_override_false_is_default_behavior():
+    """cf_override=False (default) releases to CF as before."""
+    applicator = ActionApplicator()
+    mock_sumo = _make_sumo(20.0)
+
+    actual_decel = applicator.apply(mock_sumo, 0.0, cf_override=False)
+
+    mock_sumo.release_vehicle_speed.assert_called_once_with("V001")
+    assert actual_decel == pytest.approx(0.0)
