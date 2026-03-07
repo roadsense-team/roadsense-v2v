@@ -26,19 +26,32 @@ class ActionApplicator:
         fraction = max(0.0, min(1.0, float(action_value)))
         return fraction * self.MAX_DECEL
 
-    def apply(self, sumo: "SUMOConnection", action_value: float) -> float:
+    def apply(
+        self,
+        sumo: "SUMOConnection",
+        action_value: float,
+        cf_override: bool = False,
+    ) -> float:
         """
         Apply action to ego vehicle.
 
         When action is near zero, releases speed control to SUMO's
         car-following model so the vehicle can accelerate naturally.
 
-        Returns actual deceleration applied in m/s^2 (0.0 when released).
+        When cf_override is True (hazard active), low actions hold current
+        speed instead of releasing to CF, forcing the RL model to be the
+        sole source of deceleration.
+
+        Returns actual deceleration applied in m/s^2 (0.0 when released/held).
         """
         clamped = max(0.0, min(1.0, float(action_value)))
 
         if clamped <= self.RELEASE_THRESHOLD:
-            sumo.release_vehicle_speed(self.EGO_VEHICLE_ID)
+            if cf_override:
+                current_state = sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
+                sumo.set_vehicle_speed(self.EGO_VEHICLE_ID, current_state.speed)
+            else:
+                sumo.release_vehicle_speed(self.EGO_VEHICLE_ID)
             return 0.0
 
         requested_decel = clamped * self.MAX_DECEL

@@ -754,3 +754,83 @@ class TestConvoyEnvDataset:
 
         assert info["scenario_id"] is None
         env.close()
+
+
+class TestCFOverride:
+    """Tests for car-following model override during hazard events."""
+
+    def test_cf_override_inactive_before_hazard(self, tmp_path, mock_emulator, mock_sumo):
+        """CF override is not active when no hazard has been injected."""
+        cfg = tmp_path / "test.sumocfg"
+        cfg.write_text("<configuration></configuration>")
+
+        with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+             patch("traci.vehicle.getIDList", return_value=["V001", "V002"]):
+            env = ConvoyEnv(
+                sumo_cfg=str(cfg),
+                emulator=mock_emulator,
+                hazard_injection=False,
+            )
+            env.reset()
+
+            assert env._cf_override_active is False
+            assert env._hazard_injection_step is None
+            env.close()
+
+    def test_cf_override_activates_after_hazard_grace_period(
+        self, tmp_path, mock_emulator, mock_sumo
+    ):
+        """CF override activates CF_OVERRIDE_GRACE_STEPS after hazard injection."""
+        cfg = tmp_path / "test.sumocfg"
+        cfg.write_text("<configuration></configuration>")
+
+        with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+             patch("traci.vehicle.getIDList", return_value=["V001", "V002"]):
+            env = ConvoyEnv(
+                sumo_cfg=str(cfg),
+                emulator=mock_emulator,
+                hazard_injection=False,
+            )
+            env.reset()
+
+            # Simulate hazard having fired at step 0
+            env._hazard_injection_step = 0
+            env._step_count = 0
+
+            # Step through grace period — CF override should NOT be active
+            for _ in range(ConvoyEnv.CF_OVERRIDE_GRACE_STEPS):
+                assert env._cf_override_active is False
+                env.step(np.array([0.0]))
+
+            # One more step should activate CF override (check runs at top of step)
+            assert env._cf_override_active is False  # not yet, step() hasn't run
+            env.step(np.array([0.0]))
+            assert env._cf_override_active is True
+
+            env.close()
+
+    def test_cf_override_resets_between_episodes(
+        self, tmp_path, mock_emulator, mock_sumo
+    ):
+        """CF override state resets when reset() is called."""
+        cfg = tmp_path / "test.sumocfg"
+        cfg.write_text("<configuration></configuration>")
+
+        with patch("ml.envs.convoy_env.SUMOConnection", return_value=mock_sumo), \
+             patch("traci.vehicle.getIDList", return_value=["V001", "V002"]):
+            env = ConvoyEnv(
+                sumo_cfg=str(cfg),
+                emulator=mock_emulator,
+                hazard_injection=False,
+            )
+            env.reset()
+
+            # Simulate hazard state from a previous episode
+            env._hazard_injection_step = 5
+            env._cf_override_active = True
+
+            # Reset should clear hazard state
+            env.reset()
+            assert env._hazard_injection_step is None
+            assert env._cf_override_active is False
+            env.close()
