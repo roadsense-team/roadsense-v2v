@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 008 - User-Data Template
+# RoadSense Training Run 009 - User-Data Template
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,11 +10,12 @@
 #   TOTAL_STEPS   - Training timesteps (default: 10000000)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 008 Linear Ramp Reward (Grok-style poverty trap fix):
-#   - Safety: discrete zones replaced with linear ramp -5→+3 over 5m-20m
-#   - Comfort: graduated suppression (multiplier scales with distance, min 0.1)
-#   - Far zone: +0.5 -> -1.0 (active anti-laziness penalty)
-#   - No cliff at 10m or 15m — continuous gradient from spawn to safe plateau
+# Run 009 Linear Ramp + Active V2V Incentive + Stability Fixes:
+#   - Safety: linear ramp -5→+4 over 5m-20m (steeper gradient, span=9)
+#   - Safe plateau: +4/step (was +3) — active braking beats passive CF
+#   - Far zone: -2/step (was -1) — stronger anti-laziness
+#   - Comfort: graduated suppression (unchanged from Run 008)
+#   - Stability: LR 0.0001, n_steps 4096, log_std_init -0.5
 #   - Infrastructure: GT collision, Warmup, 5-dim observation, mesh relay preserved
 #   - Dataset: dataset_v3/base_real (100% real-grounded)
 #   - Eval: 200 episodes (Deterministic Matrix n=1-5)
@@ -22,7 +23,7 @@
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_008"
+RUN_ID="cloud_prod_009"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=10000000
 S3_BUCKET="saferide-training-results"

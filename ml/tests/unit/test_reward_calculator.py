@@ -1,8 +1,8 @@
 """
 Unit tests for RewardCalculator.
 
-Run 008 — Linear ramp reward structure:
-  collision(<5m), ramp(5-20m linear -5→+3), safe(20-35m +3), far(>35m -1)
+Run 009 — Linear ramp reward structure:
+  collision(<5m), ramp(5-20m linear -5→+4), safe(20-35m +4), far(>35m -2)
   Comfort graduated by distance (min multiplier 0.1).
 """
 
@@ -26,42 +26,42 @@ def test_safety_at_ramp_start_5m_returns_neg_5():
 
 def test_safety_at_spawn_8m_returns_ramp_value():
     calc = RewardCalculator()
-    # -5 + 8 * (3/15) = -5 + 1.6 = -3.4
-    assert calc._safety_reward(8.0) == pytest.approx(-3.4, abs=0.01)
+    # -5 + 9 * (3/15) = -5 + 1.8 = -3.2
+    assert calc._safety_reward(8.0) == pytest.approx(-3.2, abs=0.01)
 
 
 def test_safety_at_10m_returns_ramp_value():
     calc = RewardCalculator()
-    # -5 + 8 * (5/15) = -5 + 2.667 = -2.333
-    assert calc._safety_reward(10.0) == pytest.approx(-2.333, abs=0.01)
+    # -5 + 9 * (5/15) = -5 + 3.0 = -2.0
+    assert calc._safety_reward(10.0) == pytest.approx(-2.0, abs=0.01)
 
 
 def test_safety_at_12_5m_returns_ramp_midpoint():
     calc = RewardCalculator()
-    # -5 + 8 * (7.5/15) = -5 + 4.0 = -1.0
-    assert calc._safety_reward(12.5) == pytest.approx(-1.0, abs=0.01)
+    # -5 + 9 * (7.5/15) = -5 + 4.5 = -0.5
+    assert calc._safety_reward(12.5) == pytest.approx(-0.5, abs=0.01)
 
 
 def test_safety_at_15m_returns_positive_ramp():
     calc = RewardCalculator()
-    # -5 + 8 * (10/15) = -5 + 5.333 = +0.333
-    assert calc._safety_reward(15.0) == pytest.approx(0.333, abs=0.01)
+    # -5 + 9 * (10/15) = -5 + 6.0 = +1.0
+    assert calc._safety_reward(15.0) == pytest.approx(1.0, abs=0.01)
 
 
-def test_safety_at_ramp_end_20m_returns_plus_3():
+def test_safety_at_ramp_end_20m_returns_plus_4():
     calc = RewardCalculator()
-    assert calc._safety_reward(20.0) == pytest.approx(3.0)
+    assert calc._safety_reward(20.0) == pytest.approx(4.0)
 
 
-def test_safety_in_safe_plateau_returns_plus_3():
+def test_safety_in_safe_plateau_returns_plus_4():
     calc = RewardCalculator()
-    assert calc._safety_reward(25.0) == pytest.approx(3.0)
-    assert calc._safety_reward(35.0) == pytest.approx(3.0)
+    assert calc._safety_reward(25.0) == pytest.approx(4.0)
+    assert calc._safety_reward(35.0) == pytest.approx(4.0)
 
 
-def test_safety_far_returns_neg_1():
+def test_safety_far_returns_neg_2():
     calc = RewardCalculator()
-    assert calc._safety_reward(40.0) == pytest.approx(-1.0)
+    assert calc._safety_reward(40.0) == pytest.approx(-2.0)
 
 
 def test_safety_ramp_is_monotonically_increasing():
@@ -178,8 +178,8 @@ def test_unnecessary_braking_far():
 def test_calculate_safe_no_brake():
     calc = RewardCalculator()
     total, info = calc.calculate(distance=25.0, action_value=0.0, deceleration=0.2)
-    assert total == pytest.approx(3.0)
-    assert info["reward_safety"] == pytest.approx(3.0)
+    assert total == pytest.approx(4.0)
+    assert info["reward_safety"] == pytest.approx(4.0)
     assert info["reward_comfort"] == pytest.approx(0.0)
     assert info["reward_appropriateness"] == pytest.approx(0.0)
 
@@ -241,7 +241,7 @@ def test_calculate_comfort_full_in_safe_zone():
     calc = RewardCalculator()
     _, info = calc.calculate(distance=25.0, action_value=0.5, deceleration=4.0)
     assert info["reward_comfort"] < 0.0
-    assert info["reward_safety"] == pytest.approx(3.0)
+    assert info["reward_safety"] == pytest.approx(4.0)
 
 
 def test_calculate_braking_better_than_not_braking_when_close_and_closing():
@@ -304,7 +304,16 @@ def test_random_policy_reward_at_spawn_is_not_dominated_by_comfort():
     manageable comfort cost relative to safety signal."""
     calc = RewardCalculator()
     _, info = calc.calculate(distance=8.0, action_value=0.5, deceleration=4.0)
-    # Safety at 8m is -3.4, comfort at 4.0 with multiplier 0.2 is small
     assert abs(info["reward_comfort"]) < abs(info["reward_safety"]), (
         "Comfort must not drown safety signal at spawn"
+    )
+
+
+def test_safe_plateau_beats_passive_do_nothing_at_ramp():
+    """Active braking to safe zone (+4/step) clearly beats passive at ramp mid."""
+    calc = RewardCalculator()
+    safe_reward = calc._safety_reward(25.0)   # +4
+    ramp_mid = calc._safety_reward(12.5)      # -0.5
+    assert safe_reward - ramp_mid > 4.0, (
+        "Safe zone must dominate mid-ramp by enough to justify braking cost"
     )
