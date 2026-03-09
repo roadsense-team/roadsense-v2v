@@ -16,6 +16,13 @@ from pathlib import Path
 from typing import Dict, List
 import xml.etree.ElementTree as ET
 
+from ml.scenario_layout import (
+    DEFAULT_SUMO_END_TIME_S,
+    redistribute_peer_depart_positions,
+    require_vehicle,
+    set_sumocfg_end_time,
+)
+
 
 # Synthetic peers are ordered farthest-to-closest from ego in base_real.
 DROP_PRIORITY = ("V006", "V005", "V004")
@@ -73,10 +80,7 @@ def _load_routes_tree(routes_path: Path) -> ET.ElementTree:
 
 
 def _find_v001(root: ET.Element) -> ET.Element:
-    for vehicle in root.findall("vehicle"):
-        if vehicle.get("id") == "V001":
-            return vehicle
-    raise ValueError("vehicles.rou.xml missing V001 vehicle.")
+    return require_vehicle(root, "V001")
 
 
 def _count_peers(root: ET.Element) -> int:
@@ -210,10 +214,15 @@ def _build_assignments(
 
 def _copy_required_files(source_dir: Path, target_dir: Path) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
-    for filename in ("scenario.sumocfg", "network.net.xml"):
-        src = source_dir / filename
-        _require_file(src)
-        shutil.copy2(src, target_dir / filename)
+    sumocfg_src = source_dir / "scenario.sumocfg"
+    _require_file(sumocfg_src)
+    sumocfg_tree = ET.parse(sumocfg_src)
+    set_sumocfg_end_time(sumocfg_tree, end_time_s=DEFAULT_SUMO_END_TIME_S)
+    sumocfg_tree.write(target_dir / "scenario.sumocfg", encoding="utf-8")
+
+    network_src = source_dir / "network.net.xml"
+    _require_file(network_src)
+    shutil.copy2(network_src, target_dir / "network.net.xml")
 
 
 def _replace_eval_directory(eval_dir: Path, rewritten_dir: Path) -> None:
@@ -298,6 +307,7 @@ def apply_eval_peer_count_fix(
             routes_tree = _load_routes_tree(source_dir / "vehicles.rou.xml")
             root = routes_tree.getroot()
             enforce_peer_count(root, assignment.target_peer_count)
+            redistribute_peer_depart_positions(root)
             _validate_v001_depart_zero(root)
 
             actual_count = _count_peers(root)

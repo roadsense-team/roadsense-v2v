@@ -52,18 +52,18 @@ def test_hazard_injector_respects_probability():
 
 
 def test_hazard_injector_only_injects_in_window(mock_sumo):
-    """Hazards only injected between steps 30-80."""
+    """Hazards only injected between steps 150-350."""
     inj = HazardInjector(seed=42)
 
     inj._episode_will_have_hazard = True
-    inj._hazard_step = 50
+    inj._hazard_step = 200
     inj._hazard_injected = False
 
     assert inj.maybe_inject(step=10, sumo=mock_sumo) is False
-    assert inj.maybe_inject(step=29, sumo=mock_sumo) is False
-    assert inj.maybe_inject(step=81, sumo=mock_sumo) is False
+    assert inj.maybe_inject(step=149, sumo=mock_sumo) is False
+    assert inj.maybe_inject(step=351, sumo=mock_sumo) is False
 
-    assert inj.maybe_inject(step=50, sumo=mock_sumo) is True
+    assert inj.maybe_inject(step=200, sumo=mock_sumo) is True
 
 
 def test_hazard_targets_nearest_peer(mock_sumo):
@@ -300,10 +300,10 @@ def test_reset_options_override_target_strategy_and_schedule():
             "target_strategy": HazardInjector.TARGET_STRATEGY_FIXED_RANK_AHEAD,
             "fixed_rank_ahead": 3,
             "force_hazard": True,
-            "hazard_step": 40,
+            "hazard_step": 160,
         }
     )
 
     assert inj.target_strategy == HazardInjector.TARGET_STRATEGY_FIXED_RANK_AHEAD
-    assert inj.hazard_step == 40
+    assert inj.hazard_step == 160
     assert inj._episode_will_have_hazard is True

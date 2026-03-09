@@ -3,6 +3,7 @@ Deterministic eval matrix helpers for H3 coverage.
 """
 from collections import defaultdict
 from dataclasses import dataclass
+import re
 from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
 
 
@@ -44,6 +45,38 @@ def parse_peer_count_list(raw_value: str) -> List[int]:
     return values
 
 
+def parse_bucket_list(raw_value: str | None) -> List[BucketKey]:
+    """
+    Parse comma-separated bucket labels like "n5_rank5,n4_rank3".
+    """
+    if raw_value is None:
+        return []
+
+    values: List[BucketKey] = []
+    seen = set()
+    for token in raw_value.split(","):
+        stripped = token.strip()
+        if not stripped:
+            continue
+        match = re.fullmatch(r"n(\d+)_rank(\d+)", stripped)
+        if match is None:
+            raise ValueError(
+                "bucket labels must look like n<peer_count>_rank<source_rank_ahead>"
+            )
+        peer_count = int(match.group(1))
+        source_rank_ahead = int(match.group(2))
+        if peer_count <= 0 or source_rank_ahead <= 0:
+            raise ValueError("bucket labels must use positive integers")
+        if source_rank_ahead > peer_count:
+            raise ValueError("bucket rank cannot exceed peer count")
+        bucket = (peer_count, source_rank_ahead)
+        if bucket not in seen:
+            values.append(bucket)
+            seen.add(bucket)
+
+    return values
+
+
 def bucket_label(peer_count: int, source_rank_ahead: int) -> str:
     return f"n{int(peer_count)}_rank{int(source_rank_ahead)}"
 
@@ -53,6 +86,8 @@ def build_deterministic_eval_plan(
     peer_counts_by_scenario: Mapping[str, int],
     required_peer_counts: Iterable[int],
     episodes_per_bucket: int,
+    supported_ranks_by_scenario: Mapping[str, Iterable[int]] | None = None,
+    excluded_buckets: Iterable[BucketKey] | None = None,
 ) -> Tuple[List[EvalMatrixPlanEntry], Dict[BucketKey, int]]:
     """
     Build deterministic episode assignments to satisfy per-bucket minimum counts.
@@ -98,14 +133,79 @@ def build_deterministic_eval_plan(
         missing_str = ",".join(str(value) for value in missing_required)
         raise ValueError(f"missing required peer counts: {missing_str}")
 
+    excluded = {
+        (int(peer_count), int(source_rank_ahead))
+        for peer_count, source_rank_ahead in (excluded_buckets or [])
+    }
+
     target_counts: Dict[BucketKey, int] = {}
     for peer_count in required:
         for source_rank_ahead in range(1, peer_count + 1):
+            if (peer_count, source_rank_ahead) in excluded:
+                continue
             target_counts[(peer_count, source_rank_ahead)] = episodes_per_bucket
+
+    if not target_counts:
+        raise ValueError("target_counts is empty after applying excluded_buckets")
+
+    if supported_ranks_by_scenario is not None:
+        missing_capability_scenarios = [
+            scenario_id
+            for scenario_id in eval_scenario_ids
+            if scenario_id not in supported_ranks_by_scenario
+        ]
+        if missing_capability_scenarios:
+            missing_str = ",".join(missing_capability_scenarios)
+            raise ValueError(
+                f"supported_ranks_by_scenario missing scenario_id: {missing_str}"
+            )
+
+        plan: List[EvalMatrixPlanEntry] = []
+        for peer_count, source_rank_ahead in sorted(target_counts):
+            eligible_scenarios = [
+                scenario_id
+                for scenario_id in eval_scenario_ids
+                if int(peer_counts_by_scenario[scenario_id]) == peer_count
+                and source_rank_ahead
+                in {
+                    int(rank)
+                    for rank in supported_ranks_by_scenario[scenario_id]
+                }
+            ]
+            if not eligible_scenarios:
+                raise ValueError(
+                    f"no eligible scenarios for bucket "
+                    f"{bucket_label(peer_count, source_rank_ahead)}"
+                )
+            for occurrence_index in range(episodes_per_bucket):
+                scenario_id = eligible_scenarios[
+                    occurrence_index % len(eligible_scenarios)
+                ]
+                plan.append(
+                    EvalMatrixPlanEntry(
+                        scenario_id=scenario_id,
+                        peer_count=peer_count,
+                        source_rank_ahead=source_rank_ahead,
+                    )
+                )
+
+        return plan, target_counts
 
     scenarios_by_peer_count: Dict[int, List[str]] = defaultdict(list)
     for scenario_id in eval_scenario_ids:
-        scenarios_by_peer_count[int(peer_counts_by_scenario[scenario_id])].append(scenario_id)
+        scenarios_by_peer_count[int(peer_counts_by_scenario[scenario_id])].append(
+            scenario_id
+        )
+    allowed_ranks_by_peer_count: Dict[int, List[int]] = defaultdict(list)
+    for peer_count, source_rank_ahead in sorted(target_counts):
+        allowed_ranks_by_peer_count[peer_count].append(source_rank_ahead)
+    planned_eval_scenario_ids = [
+        scenario_id
+        for scenario_id in eval_scenario_ids
+        if allowed_ranks_by_peer_count.get(int(peer_counts_by_scenario[scenario_id]))
+    ]
+    if not planned_eval_scenario_ids:
+        raise ValueError("no scenarios remain after applying excluded_buckets")
 
     achieved_counts: Dict[BucketKey, int] = defaultdict(int)
     occurrence_index_by_peer_count: Dict[int, int] = defaultdict(int)
@@ -124,7 +224,9 @@ def build_deterministic_eval_plan(
             raise RuntimeError("Exceeded max_iterations while building eval matrix plan")
         iterations += 1
 
-        scenario_id = str(eval_scenario_ids[len(plan) % len(eval_scenario_ids)])
+        scenario_id = str(
+            planned_eval_scenario_ids[len(plan) % len(planned_eval_scenario_ids)]
+        )
         peer_count = int(peer_counts_by_scenario[scenario_id])
 
         scenario_group = scenarios_by_peer_count.get(peer_count, [])
@@ -132,13 +234,20 @@ def build_deterministic_eval_plan(
             raise RuntimeError(
                 f"No scenarios found for peer_count={peer_count} while building plan"
             )
+        allowed_ranks = allowed_ranks_by_peer_count.get(peer_count, [])
+        if not allowed_ranks:
+            raise RuntimeError(
+                f"No remaining target buckets for peer_count={peer_count}"
+            )
         group_size = len(scenario_group)
         occurrence_index = occurrence_index_by_peer_count[peer_count]
         slot_index = occurrence_index % group_size
         cycle_index = occurrence_index // group_size
         # Rotate rank assignments across scenario slots each cycle to avoid
         # binding a specific rank to a single scenario.
-        current_rank = ((slot_index + cycle_index) % peer_count) + 1
+        current_rank = allowed_ranks[
+            (slot_index + cycle_index) % len(allowed_ranks)
+        ]
         occurrence_index_by_peer_count[peer_count] += 1
 
         plan.append(

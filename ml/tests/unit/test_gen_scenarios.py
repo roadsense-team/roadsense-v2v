@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pytest
 
+from ml.scenario_layout import DEFAULT_SUMO_END_TIME_S
 from ml.scripts import gen_scenarios
 
 
@@ -58,6 +59,13 @@ def _extract_routes_values(routes_tree: ET.ElementTree) -> tuple[dict, list[tupl
     return vtype_attrs, vehicles
 
 
+def _extract_depart_positions(routes_tree: ET.ElementTree) -> dict[str, str | None]:
+    return {
+        veh.get("id"): veh.get("departPos")
+        for veh in routes_tree.getroot().findall("vehicle")
+    }
+
+
 def test_load_base_scenario_success(tmp_path: Path) -> None:
     base_dir = tmp_path / "base"
     _make_base_dir(base_dir)
@@ -92,6 +100,11 @@ def test_augment_routes_v001_depart_unchanged() -> None:
     v001_depart = {vid: depart for vid, depart in vehicles}["V001"]
     assert v001_depart in ("0", "0.0")
     assert peer_count == 2  # V002 and V003
+    assert _extract_depart_positions(augmented) == {
+        "V001": "0.000",
+        "V002": "40.000",
+        "V003": "80.000",
+    }
 
 
 def test_augment_routes_parameters_in_range() -> None:
@@ -260,6 +273,26 @@ def test_compute_file_hash_deterministic(tmp_path: Path) -> None:
     second = gen_scenarios.compute_file_hash(file_path)
 
     assert first == second
+
+
+def test_write_scenario_sets_shorter_sumo_end_time(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    sumocfg_tree = ET.ElementTree(
+        ET.fromstring("<configuration><time><end value='120'/></time></configuration>")
+    )
+    network_tree = ET.ElementTree(ET.fromstring("<net/>"))
+    routes_tree = _make_routes_tree()
+
+    gen_scenarios.write_scenario(
+        output_dir=output_dir,
+        scenario_id="train_000",
+        sumocfg_tree=sumocfg_tree,
+        network_tree=network_tree,
+        routes_tree=routes_tree,
+    )
+
+    written = ET.parse(output_dir / "train_000" / "scenario.sumocfg").getroot()
+    assert written.find("./time/end").get("value") == str(int(DEFAULT_SUMO_END_TIME_S))
 
 
 # --- Tests for peer dropout ---

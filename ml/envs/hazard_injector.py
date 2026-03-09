@@ -13,8 +13,8 @@ class HazardInjector:
     """
 
     HAZARD_PROBABILITY = 0.5
-    HAZARD_WINDOW_START = 30
-    HAZARD_WINDOW_END = 80
+    HAZARD_WINDOW_START = 150
+    HAZARD_WINDOW_END = 350
 
     EMERGENCY_BRAKE = "emergency_brake"
     EGO_VEHICLE_ID = "V001"

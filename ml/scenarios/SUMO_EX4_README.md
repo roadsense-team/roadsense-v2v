@@ -136,6 +136,10 @@ docker run --rm \
   sumo-gui -c scenario.sumocfg
 ```
 
+This shortcut is for X11/WSLg. On Fedora Wayland, use the manual `XAUTHORITY` +
+`--security-opt label=disable` + `--user "$(id -u):$(id -g)"` command from
+`docs/20_KNOWLEDGE_BASE/SUMO/SUMO_RESEARCH_AND_SETUP_GUIDE.md`.
+
 ---
 
 ## 📈 Next Steps (Exercise 5)

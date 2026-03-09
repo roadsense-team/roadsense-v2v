@@ -153,16 +153,16 @@ def test_braking_peer_in_observation(make_env):
 
     for ep in range(30):
         obs, info = env.reset(seed=ep, options={
-            "hazard_options": {"force_hazard": True, "hazard_step": 40},
+            "hazard_options": {"force_hazard": True, "hazard_step": 160},
         })
 
-        for step in range(80):
+        for step in range(200):
             obs, reward, terminated, truncated, step_info = env.step(
                 np.array([0.0], dtype=np.float32)
             )
 
             # After hazard injection, check for braking signal
-            if step > 42 and obs["ego"][4] < -0.03:
+            if step > 162 and obs["ego"][4] < -0.03:
                 found_braking_signal = True
                 break
 
@@ -192,10 +192,10 @@ def test_hazard_reward_terms_disabled(make_env):
 
     for ep in range(30):
         obs, info = env.reset(seed=ep, options={
-            "hazard_options": {"force_hazard": True, "hazard_step": 40},
+            "hazard_options": {"force_hazard": True, "hazard_step": 160},
         })
 
-        for step in range(100):
+        for step in range(220):
             obs, reward, terminated, truncated, step_info = env.step(
                 np.array([0.0], dtype=np.float32)  # No braking
             )
@@ -217,16 +217,16 @@ def test_eval_matrix_coverage_mini(make_env):
     Run 10 episodes with forced hazard. Assert injection_attempted > 0
     and that info dict contains the new tracking fields.
     """
-    env = make_env(max_steps=150)
+    env = make_env(max_steps=220)
     injection_attempted_count = 0
     has_tracking_fields = False
 
     for ep in range(10):
         obs, info = env.reset(seed=ep + 100, options={
-            "hazard_options": {"force_hazard": True},
+            "hazard_options": {"force_hazard": True, "hazard_step": 160},
         })
 
-        for step in range(150):
+        for step in range(220):
             obs, reward, terminated, truncated, step_info = env.step(
                 np.array([0.0], dtype=np.float32)
             )

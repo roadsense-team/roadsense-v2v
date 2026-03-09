@@ -6,17 +6,23 @@ Usage (from ml/ directory, inside Docker):
 """
 import argparse
 import json
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import xml.etree.ElementTree as ET
 
 import gymnasium as gym
 import numpy as np
 from stable_baselines3 import PPO
 
 import ml.envs  # Registers environments
+from ml.eval_dataset import (
+    get_eval_capability_audit_path,
+    infer_peer_count,
+    load_eval_capabilities,
+    load_eval_peer_counts,
+    load_eval_scenario_ids,
+)
 from ml.eval_matrix import (
     build_deterministic_eval_plan,
+    parse_bucket_list,
     parse_peer_count_list,
     summarize_deterministic_eval_coverage,
 )
@@ -25,97 +31,6 @@ REACTION_DECEL_THRESHOLD = 0.5
 SIM_STEP_SECONDS = 0.1
 UNSAFE_DIST_THRESHOLD_M = 10.0
 BEHAVIORAL_SUCCESS_REWARD_THRESHOLD = -1000.0
-
-
-def _load_eval_scenario_ids(dataset_dir: str) -> List[str]:
-    manifest_path = Path(dataset_dir) / "manifest.json"
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"manifest.json not found in dataset_dir: {dataset_dir}")
-
-    with manifest_path.open("r", encoding="utf-8") as file_handle:
-        manifest = json.load(file_handle)
-
-    eval_scenarios = manifest.get("eval_scenarios")
-    if not isinstance(eval_scenarios, list):
-        raise KeyError("manifest.json missing required list field: eval_scenarios")
-
-    return [str(scenario_id) for scenario_id in eval_scenarios]
-
-
-def _resolve_routes_path(dataset_dir: str, scenario_id: str) -> Optional[Path]:
-    if not scenario_id or scenario_id == "unknown":
-        return None
-
-    dataset_root = Path(dataset_dir)
-    candidates: List[Path] = []
-
-    if scenario_id.startswith("eval_"):
-        candidates.append(dataset_root / "eval" / scenario_id / "vehicles.rou.xml")
-    elif scenario_id.startswith("train_"):
-        candidates.append(dataset_root / "train" / scenario_id / "vehicles.rou.xml")
-
-    candidates.extend(
-        [
-            dataset_root / "eval" / scenario_id / "vehicles.rou.xml",
-            dataset_root / "train" / scenario_id / "vehicles.rou.xml",
-        ]
-    )
-
-    for route_path in candidates:
-        if route_path.exists():
-            return route_path
-
-    return None
-
-
-def _infer_peer_count(
-    dataset_dir: str,
-    scenario_id: str,
-    cache: Dict[str, Optional[int]],
-) -> Optional[int]:
-    if scenario_id in cache:
-        return cache[scenario_id]
-
-    routes_path = _resolve_routes_path(dataset_dir, scenario_id)
-    if routes_path is None:
-        cache[scenario_id] = None
-        return None
-
-    try:
-        routes_tree = ET.parse(routes_path)
-    except (ET.ParseError, OSError):
-        cache[scenario_id] = None
-        return None
-
-    root = routes_tree.getroot()
-    peer_count = 0
-    for elem in root.iter():
-        tag = elem.tag.split("}", 1)[-1] if isinstance(elem.tag, str) else elem.tag
-        if tag == "vehicle" and elem.get("id") != "V001":
-            peer_count += 1
-
-    cache[scenario_id] = peer_count
-    return peer_count
-
-
-def _load_eval_peer_counts(
-    dataset_dir: str,
-    eval_scenario_ids: List[str],
-) -> Dict[str, int]:
-    """
-    Load peer counts for eval scenarios, failing if any count cannot be inferred.
-    """
-    cache: Dict[str, Optional[int]] = {}
-    peer_counts: Dict[str, int] = {}
-    for scenario_id in eval_scenario_ids:
-        peer_count = _infer_peer_count(dataset_dir, scenario_id, cache)
-        if peer_count is None:
-            raise ValueError(
-                f"Could not infer peer_count for eval scenario: {scenario_id}"
-            )
-        peer_counts[scenario_id] = int(peer_count)
-    return peer_counts
-
 
 def _summarize_episode_group(episodes: List[dict]) -> dict:
     episode_count = len(episodes)
@@ -343,6 +258,15 @@ def main():
             "deterministic eval matrix mode (default: 10)."
         ),
     )
+    parser.add_argument(
+        "--matrix_excluded_buckets",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated bucket labels to exclude from deterministic "
+            "matrix coverage (example: n5_rank5)."
+        ),
+    )
     args = parser.parse_args()
 
     if args.episodes <= 0:
@@ -360,6 +284,8 @@ def main():
     eval_matrix_plan = None
     eval_matrix_target_counts = None
     eval_matrix_required_peer_counts = None
+    eval_matrix_excluded_buckets = None
+    capability_audit_used = False
 
     if args.use_deterministic_matrix:
         if args.hazard_target_strategy is not None:
@@ -375,24 +301,41 @@ def main():
                 "--use_deterministic_matrix is incompatible with --hazard_fixed_rank_ahead."
             )
 
-        eval_scenario_ids = _load_eval_scenario_ids(args.dataset_dir)
+        eval_scenario_ids = load_eval_scenario_ids(args.dataset_dir)
         if not eval_scenario_ids:
             raise ValueError("Dataset eval_scenarios is empty; cannot evaluate.")
 
         eval_matrix_required_peer_counts = parse_peer_count_list(args.matrix_peer_counts)
-        peer_counts_by_scenario = _load_eval_peer_counts(
+        eval_matrix_excluded_buckets = parse_bucket_list(
+            args.matrix_excluded_buckets
+        )
+        peer_counts_by_scenario = load_eval_peer_counts(
             args.dataset_dir,
             eval_scenario_ids,
         )
+        supported_ranks_by_scenario = load_eval_capabilities(
+            args.dataset_dir,
+            eval_scenario_ids,
+            allow_missing_file=True,
+        )
+        capability_audit_used = supported_ranks_by_scenario is not None
+        if not capability_audit_used:
+            print(
+                "No eval capability audit found at "
+                f"{get_eval_capability_audit_path(args.dataset_dir)}; "
+                "falling back to count-only deterministic planning."
+            )
         eval_matrix_plan, eval_matrix_target_counts = build_deterministic_eval_plan(
             eval_scenario_ids=eval_scenario_ids,
             peer_counts_by_scenario=peer_counts_by_scenario,
             required_peer_counts=eval_matrix_required_peer_counts,
             episodes_per_bucket=args.matrix_episodes_per_bucket,
+            supported_ranks_by_scenario=supported_ranks_by_scenario,
+            excluded_buckets=eval_matrix_excluded_buckets,
         )
         total_episodes = len(eval_matrix_plan)
     elif args.episodes_per_scenario is not None:
-        eval_scenario_ids = _load_eval_scenario_ids(args.dataset_dir)
+        eval_scenario_ids = load_eval_scenario_ids(args.dataset_dir)
         if not eval_scenario_ids:
             raise ValueError("Dataset eval_scenarios is empty; cannot evaluate.")
         total_episodes = args.episodes_per_scenario * len(eval_scenario_ids)
@@ -529,7 +472,7 @@ def main():
                 0.0, (int(reaction_step) - int(hazard_step)) * SIM_STEP_SECONDS
             )
 
-        peer_count = _infer_peer_count(args.dataset_dir, scenario_id, peer_count_cache)
+        peer_count = infer_peer_count(args.dataset_dir, scenario_id, peer_count_cache)
         collision = bool(terminated)
         truncation = bool(truncated)
         outcome = "collision" if collision else "truncated" if truncation else "other"
@@ -607,8 +550,16 @@ def main():
             target_counts=eval_matrix_target_counts,
         )
         eval_matrix_summary["required_peer_counts"] = eval_matrix_required_peer_counts
+        eval_matrix_summary["excluded_buckets"] = [
+            f"n{peer_count}_rank{source_rank_ahead}"
+            for peer_count, source_rank_ahead in (eval_matrix_excluded_buckets or [])
+        ]
         eval_matrix_summary["episodes_per_bucket"] = args.matrix_episodes_per_bucket
         eval_matrix_summary["planned_episodes"] = len(eval_matrix_plan or [])
+        eval_matrix_summary["capability_audit_used"] = capability_audit_used
+        eval_matrix_summary["capability_audit_path"] = str(
+            get_eval_capability_audit_path(args.dataset_dir)
+        )
 
         if not eval_matrix_summary["coverage_ok"]:
             eval_matrix_coverage_error = (
@@ -624,6 +575,14 @@ def main():
         "deterministic_eval_matrix": bool(args.use_deterministic_matrix),
         "matrix_peer_counts": (
             eval_matrix_required_peer_counts if args.use_deterministic_matrix else None
+        ),
+        "matrix_excluded_buckets": (
+            [
+                f"n{peer_count}_rank{source_rank_ahead}"
+                for peer_count, source_rank_ahead in (eval_matrix_excluded_buckets or [])
+            ]
+            if args.use_deterministic_matrix
+            else None
         ),
         "matrix_episodes_per_bucket": (
             args.matrix_episodes_per_bucket if args.use_deterministic_matrix else None

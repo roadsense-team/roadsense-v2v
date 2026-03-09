@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+from ml.scenario_layout import DEFAULT_SUMO_END_TIME_S
 from ml.scripts import fix_eval_peer_counts
 
 
@@ -129,15 +130,25 @@ def test_apply_eval_peer_count_fix_rewrites_eval_and_manifest(tmp_path: Path) ->
     n1_routes = ET.parse(dataset_dir / "eval" / "eval_n1_000" / "vehicles.rou.xml").getroot()
     n1_peers = [v.get("id") for v in n1_routes.findall("vehicle") if v.get("id") != "V001"]
     assert n1_peers == ["V002"]
+    assert {
+        v.get("id"): v.get("departPos")
+        for v in n1_routes.findall("vehicle")
+    } == {"V001": "0.000", "V002": "50.000"}
 
     n2_routes = ET.parse(dataset_dir / "eval" / "eval_n2_000" / "vehicles.rou.xml").getroot()
     n2_peers = [v.get("id") for v in n2_routes.findall("vehicle") if v.get("id") != "V001"]
     assert len(n2_peers) == 2
+    assert {
+        v.get("id"): v.get("departPos")
+        for v in n2_routes.findall("vehicle")
+    } == {"V001": "0.000", "V002": "40.000", "V003": "80.000"}
 
     for scenario_id in ("eval_n1_000", "eval_n2_000"):
         scenario_dir = dataset_dir / "eval" / scenario_id
         assert (scenario_dir / "scenario.sumocfg").exists()
         assert (scenario_dir / "network.net.xml").exists()
+        sumocfg_root = ET.parse(scenario_dir / "scenario.sumocfg").getroot()
+        assert sumocfg_root.find("./time/end").get("value") == str(int(DEFAULT_SUMO_END_TIME_S))
 
     rewritten_manifest = json.loads((dataset_dir / "manifest.json").read_text(encoding="utf-8"))
     assert rewritten_manifest["eval_scenarios"] == ["eval_n1_000", "eval_n2_000"]

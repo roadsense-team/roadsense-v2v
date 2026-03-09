@@ -68,6 +68,7 @@ def _make_args(**overrides):
         eval_force_hazard=False,
         eval_use_deterministic_matrix=False,
         eval_matrix_peer_counts="1,2,3,4,5",
+        eval_matrix_excluded_buckets="",
         eval_matrix_episodes_per_bucket=10,
         skip_eval=False,
         run_id="run_123",
@@ -111,6 +112,31 @@ def _write_eval_dataset(tmp_path: Path, peer_counts_by_scenario: dict[str, int])
     return str(dataset_dir)
 
 
+def _write_eval_capability_audit(
+    dataset_dir: str,
+    capabilities_by_scenario: dict[str, list[int]],
+) -> None:
+    scenarios = []
+    for scenario_id, supported_ranks in capabilities_by_scenario.items():
+        scenarios.append(
+            {
+                "scenario_id": scenario_id,
+                "peer_count": max(supported_ranks) if supported_ranks else 0,
+                "supported_ranks_any_step": supported_ranks,
+                "supported_steps_by_rank": {
+                    str(rank): [40] for rank in supported_ranks
+                },
+                "failed_steps_by_rank": {},
+                "failure_reasons_by_rank": {},
+            }
+        )
+
+    Path(dataset_dir, "eval_capability_audit.json").write_text(
+        json.dumps({"scenarios": scenarios}),
+        encoding="utf-8",
+    )
+
+
 def test_parse_args_defaults(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["train_convoy"])
 
@@ -140,6 +166,7 @@ def test_parse_args_defaults(monkeypatch):
     assert args.eval_force_hazard is False
     assert args.eval_use_deterministic_matrix is False
     assert args.eval_matrix_peer_counts == "1,2,3,4,5"
+    assert args.eval_matrix_excluded_buckets == ""
     assert args.eval_matrix_episodes_per_bucket == 10
     assert args.gui is False
 
@@ -203,6 +230,8 @@ def test_parse_args_all_hyperparams(monkeypatch):
             "--eval_use_deterministic_matrix",
             "--eval_matrix_peer_counts",
             "1,2,3",
+            "--eval_matrix_excluded_buckets",
+            "n3_rank3",
             "--eval_matrix_episodes_per_bucket",
             "7",
             "--gui",
@@ -231,6 +260,7 @@ def test_parse_args_all_hyperparams(monkeypatch):
     assert args.eval_force_hazard is True
     assert args.eval_use_deterministic_matrix is True
     assert args.eval_matrix_peer_counts == "1,2,3"
+    assert args.eval_matrix_excluded_buckets == "n3_rank3"
     assert args.eval_matrix_episodes_per_bucket == 7
     assert args.gui is True
 
@@ -669,6 +699,7 @@ def test_evaluate_deterministic_matrix_schedules_fixed_rank_and_reports_coverage
 
     assert metrics["eval_episodes"] == 4
     assert metrics["eval_matrix"]["coverage_ok"] is True
+    assert metrics["eval_matrix"]["excluded_buckets"] == []
     assert metrics["eval_matrix"]["missing_buckets"] == []
 
     reset_options = [
@@ -682,6 +713,270 @@ def test_evaluate_deterministic_matrix_schedules_fixed_rank_and_reports_coverage
     ]
     assert [options["hazard_fixed_rank_ahead"] for options in reset_options] == [1, 1, 1, 2]
     assert all(options["hazard_force"] is True for options in reset_options)
+
+
+def test_evaluate_deterministic_matrix_uses_capability_audit_when_present(
+    monkeypatch,
+    tmp_path,
+):
+    episodes = [
+        {
+            "scenario_id": "eval_000",
+            "steps": [
+                (
+                    1.0,
+                    False,
+                    True,
+                    {
+                        "step": 40,
+                        "distance": 12.0,
+                        "deceleration": 0.6,
+                        "hazard_injected": True,
+                        "hazard_source_id": "V002",
+                        "hazard_step": 40,
+                        "hazard_source_rank_ahead": 1,
+                        "mesh_received_source_ids": ["V002"],
+                        "mesh_any_braking_peer_received": True,
+                    },
+                )
+            ],
+        },
+        {
+            "scenario_id": "eval_001",
+            "steps": [
+                (
+                    1.0,
+                    False,
+                    True,
+                    {
+                        "step": 40,
+                        "distance": 12.0,
+                        "deceleration": 0.6,
+                        "hazard_injected": True,
+                        "hazard_source_id": "V002",
+                        "hazard_step": 40,
+                        "hazard_source_rank_ahead": 1,
+                        "mesh_received_source_ids": ["V002"],
+                        "mesh_any_braking_peer_received": True,
+                    },
+                )
+            ],
+        },
+        {
+            "scenario_id": "eval_000",
+            "steps": [
+                (
+                    1.0,
+                    False,
+                    True,
+                    {
+                        "step": 40,
+                        "distance": 12.0,
+                        "deceleration": 0.6,
+                        "hazard_injected": True,
+                        "hazard_source_id": "V003",
+                        "hazard_step": 40,
+                        "hazard_source_rank_ahead": 2,
+                        "mesh_received_source_ids": ["V003"],
+                        "mesh_any_braking_peer_received": True,
+                    },
+                )
+            ],
+        },
+        {
+            "scenario_id": "eval_000",
+            "steps": [
+                (
+                    1.0,
+                    False,
+                    True,
+                    {
+                        "step": 40,
+                        "distance": 12.0,
+                        "deceleration": 0.6,
+                        "hazard_injected": True,
+                        "hazard_source_id": "V003",
+                        "hazard_step": 40,
+                        "hazard_source_rank_ahead": 2,
+                        "mesh_received_source_ids": ["V003"],
+                        "mesh_any_braking_peer_received": True,
+                    },
+                )
+            ],
+        },
+    ]
+    dummy_env = DummyEnv(episodes)
+
+    mock_model = MagicMock()
+    mock_model.predict.return_value = (0, None)
+
+    monkeypatch.setattr(train_convoy.gym, "make", lambda *_args, **_kwargs: dummy_env)
+    monkeypatch.setattr(train_convoy.PPO, "load", lambda _path: mock_model)
+
+    dataset_dir = _write_eval_dataset(tmp_path, {"eval_000": 2, "eval_001": 2})
+    _write_eval_capability_audit(
+        dataset_dir,
+        {
+            "eval_000": [1, 2],
+            "eval_001": [1],
+        },
+    )
+    args = _make_args(
+        dataset_dir=dataset_dir,
+        eval_episodes=1,
+        eval_use_deterministic_matrix=True,
+        eval_matrix_peer_counts="2",
+        eval_matrix_episodes_per_bucket=2,
+    )
+    metrics = train_convoy.evaluate("/tmp/model.zip", args)
+
+    assert metrics["scenarios_evaluated"] == [
+        "eval_000",
+        "eval_001",
+        "eval_000",
+        "eval_000",
+    ]
+    assert metrics["eval_matrix"]["capability_audit_used"] is True
+    reset_options = [call.get("options", {}) for call in dummy_env.reset_calls]
+    assert [options["hazard_fixed_rank_ahead"] for options in reset_options] == [
+        1,
+        1,
+        2,
+        2,
+    ]
+
+
+def test_evaluate_deterministic_matrix_excludes_structural_bucket(
+    monkeypatch,
+    tmp_path,
+):
+    episodes = [
+        {
+            "scenario_id": "eval_000",
+            "steps": [
+                (
+                    1.0,
+                    False,
+                    True,
+                    {
+                        "step": 40,
+                        "distance": 12.0,
+                        "deceleration": 0.6,
+                        "hazard_injected": True,
+                        "hazard_source_id": "V002",
+                        "hazard_step": 40,
+                        "hazard_source_rank_ahead": 1,
+                        "mesh_received_source_ids": ["V002"],
+                        "mesh_any_braking_peer_received": True,
+                    },
+                )
+            ],
+        },
+        {
+            "scenario_id": "eval_000",
+            "steps": [
+                (
+                    1.0,
+                    False,
+                    True,
+                    {
+                        "step": 40,
+                        "distance": 12.0,
+                        "deceleration": 0.6,
+                        "hazard_injected": True,
+                        "hazard_source_id": "V003",
+                        "hazard_step": 40,
+                        "hazard_source_rank_ahead": 2,
+                        "mesh_received_source_ids": ["V003"],
+                        "mesh_any_braking_peer_received": True,
+                    },
+                )
+            ],
+        },
+        {
+            "scenario_id": "eval_000",
+            "steps": [
+                (
+                    1.0,
+                    False,
+                    True,
+                    {
+                        "step": 40,
+                        "distance": 12.0,
+                        "deceleration": 0.6,
+                        "hazard_injected": True,
+                        "hazard_source_id": "V004",
+                        "hazard_step": 40,
+                        "hazard_source_rank_ahead": 3,
+                        "mesh_received_source_ids": ["V004"],
+                        "mesh_any_braking_peer_received": True,
+                    },
+                )
+            ],
+        },
+        {
+            "scenario_id": "eval_000",
+            "steps": [
+                (
+                    1.0,
+                    False,
+                    True,
+                    {
+                        "step": 40,
+                        "distance": 12.0,
+                        "deceleration": 0.6,
+                        "hazard_injected": True,
+                        "hazard_source_id": "V005",
+                        "hazard_step": 40,
+                        "hazard_source_rank_ahead": 4,
+                        "mesh_received_source_ids": ["V005"],
+                        "mesh_any_braking_peer_received": True,
+                    },
+                )
+            ],
+        },
+    ]
+    dummy_env = DummyEnv(episodes)
+
+    mock_model = MagicMock()
+    mock_model.predict.return_value = (0, None)
+
+    monkeypatch.setattr(train_convoy.gym, "make", lambda *_args, **_kwargs: dummy_env)
+    monkeypatch.setattr(train_convoy.PPO, "load", lambda _path: mock_model)
+
+    dataset_dir = _write_eval_dataset(tmp_path, {"eval_000": 5})
+    _write_eval_capability_audit(
+        dataset_dir,
+        {
+            "eval_000": [1, 2, 3, 4],
+        },
+    )
+    args = _make_args(
+        dataset_dir=dataset_dir,
+        eval_episodes=1,
+        eval_use_deterministic_matrix=True,
+        eval_matrix_peer_counts="5",
+        eval_matrix_excluded_buckets="n5_rank5",
+        eval_matrix_episodes_per_bucket=1,
+    )
+    metrics = train_convoy.evaluate("/tmp/model.zip", args)
+
+    assert metrics["eval_episodes"] == 4
+    assert metrics["eval_matrix"]["coverage_ok"] is True
+    assert metrics["eval_matrix"]["excluded_buckets"] == ["n5_rank5"]
+    assert metrics["eval_matrix"]["observed_counts"] == {
+        "n5_rank1": 1,
+        "n5_rank2": 1,
+        "n5_rank3": 1,
+        "n5_rank4": 1,
+    }
+    reset_options = [call.get("options", {}) for call in dummy_env.reset_calls]
+    assert [options["hazard_fixed_rank_ahead"] for options in reset_options] == [
+        1,
+        2,
+        3,
+        4,
+    ]
 
 
 def test_save_metrics_creates_file(tmp_path):
@@ -731,6 +1026,7 @@ def test_save_metrics_schema(tmp_path):
     assert data["config"]["learning_rate"] == args.learning_rate
     assert data["config"]["n_steps"] == args.n_steps
     assert data["config"]["ent_coef"] == args.ent_coef
+    assert data["config"]["eval_matrix_excluded_buckets"] == args.eval_matrix_excluded_buckets
     assert data["training"] == training_metrics
     assert data["evaluation"] == eval_metrics
 
