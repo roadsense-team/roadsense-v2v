@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 010 - User-Data Template
+# RoadSense Training Run 011 - User-Data Template
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,23 +10,21 @@
 #   TOTAL_STEPS   - Training timesteps (default: 10000000)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 010 CF Override — Force RL to brake during hazards:
-#   - NEW: CF override disables car-following model after hazard injection + 3-step grace
-#     RL model is sole source of deceleration during hazard events
-#   - NEW: Eval matrix tracking fixed (hazard_injection_attempted in episode_details)
-#   - Safety: linear ramp -5→+4 over 5m-20m (unchanged from Run 009)
-#   - Safe plateau: +4/step (unchanged)
-#   - Far zone: -2/step (unchanged)
-#   - Comfort: graduated suppression (unchanged)
-#   - Stability: LR 0.0001, n_steps 4096, log_std_init -0.5 (unchanged)
-#   - Infrastructure: GT collision, Warmup, 5-dim observation, mesh relay preserved
-#   - Dataset: dataset_v3/base_real (100% real-grounded)
-#   - Eval: Deterministic Matrix n=1-5, 10 episodes/bucket
+# Run 011 Formation Stability Fix:
+#   - NEW: Peer departPos redistributed with 25-50m spacing (was 5.9-22m)
+#     Fixes SUMO safe-insertion stagger + CF compression to bumper-to-bumper
+#   - NEW: Episode shortened from 1000 to 500 steps (50s) to fit 785m route
+#   - NEW: Hazard window moved from steps 30-80 to 150-350 (sim seconds ~21-41)
+#   - NEW: sumocfg end time reduced from 120s to 65s
+#   - NEW: 40 eval scenarios (was 10), 8 per peer count n=1-5
+#   - Eval capability audit: 15/15 buckets, zero failures
+#   - CF override, reward, stability params all unchanged from Run 010
+#   - Dataset: dataset_v6/base_real (formation-fixed, 100% real-grounded)
 # =============================================================================
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_010"
+RUN_ID="cloud_prod_011"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=10000000
 S3_BUCKET="saferide-training-results"
@@ -35,7 +33,7 @@ S3_BUCKET="saferide-training-results"
 export AWS_DEFAULT_REGION=il-central-1
 export AWS_REGION="$AWS_DEFAULT_REGION"
 WORK_DIR="/home/ubuntu/work"
-DATASET_DIR="ml/scenarios/datasets/dataset_v3/base_real"
+DATASET_DIR="ml/scenarios/datasets/dataset_v6"
 EMULATOR_PARAMS="ml/espnow_emulator/emulator_params_measured.json"
 
 # -------------------------------------------------------------------
@@ -90,25 +88,25 @@ echo "[2/7] Rebuilding Docker image (cached - should be fast)..."
 cd "$WORK_DIR/ml"
 docker build -t roadsense-ml:latest .
 
-# 3. Generate dataset_v3 from base_real
-echo "[3/7] Generating dataset_v3 from base_real..."
+# 3. Generate dataset_v6 from base_real
+echo "[3/7] Generating dataset_v6 from base_real..."
 cd "$WORK_DIR"
 ./ml/run_docker.sh generate \
     --base_dir ml/scenarios/base_real \
     --output_dir "$DATASET_DIR" \
     --seed 42 \
     --train_count 25 \
-    --eval_count 10 \
+    --eval_count 40 \
     --peer_drop_prob 0.4 \
     --eval_peer_drop_prob 0.0 \
     --min_peers 1 \
     --emulator_params "$EMULATOR_PARAMS"
 
-# 4. Enforce deterministic eval peer counts
-echo "[4/7] Enforcing eval peer counts (2x each n=1-5)..."
+# 4. Enforce deterministic eval peer counts (8x each n=1-5)
+echo "[4/7] Enforcing eval peer counts (8x each n=1-5)..."
 ./ml/run_docker.sh python3 ml/scripts/fix_eval_peer_counts.py \
     --dataset_dir "$DATASET_DIR" \
-    --target_counts 1,1,2,2,3,3,4,4,5,5
+    --target_counts 1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,5,5,5,5,5,5,5,5
 
 # 5. Verify dataset structure
 echo "[5/7] Verifying dataset structure..."
@@ -122,7 +120,7 @@ print(f'Train scenarios: {len(train)}')
 print(f'Eval scenarios:  {len(evl)}')
 if len(train) < 20:
     print('ERROR: Too few train scenarios'); sys.exit(1)
-if len(evl) < 10:
+if len(evl) < 40:
     print('ERROR: Too few eval scenarios'); sys.exit(1)
 print('Dataset verification PASSED')
 "
