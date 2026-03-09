@@ -30,13 +30,26 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
+from ml.scenario_layout import (
+    DEFAULT_SUMO_END_TIME_S,
+    redistribute_peer_depart_positions,
+    set_sumocfg_end_time,
+)
+
 
 AUGMENTATION_RANGES = {
     "speedFactor": (0.8, 1.2),
     "sigma": (0.0, 0.5),
     "decel": (3.5, 5.5),
     "tau": (0.5, 1.5),
-    "spawn_jitter_s": (0.0, 2.0),
+    # spawn_jitter_s MUST stay at (0.0, 0.0).  Previously (0.0, 2.0) which
+    # delayed peer depart times while ego stayed at t=0.  On a single-lane
+    # route ego accelerated into the peers' insertion gaps, causing SUMO to
+    # place peers behind ego — breaking the convoy formation and making most
+    # eval buckets (and training scenarios) geometrically invalid.
+    # See: docs/10_PLANS_ACTIVE/RUN_010_EVAL_RECOVERY_PLAN.md § "Root cause:
+    # formation breakup during simulation"
+    "spawn_jitter_s": (0.0, 0.0),
 }
 
 
@@ -136,6 +149,7 @@ def augment_routes(
         config.peer_drop_prob,
         config.min_peers,
     )
+    redistribute_peer_depart_positions(root)
 
     if config.route_randomize_non_ego:
         randomize_routes(root, rng, config.route_include_v001)
@@ -296,6 +310,8 @@ def write_scenario(
     """
     scenario_dir = output_dir / scenario_id
     scenario_dir.mkdir(parents=True, exist_ok=True)
+
+    set_sumocfg_end_time(sumocfg_tree, end_time_s=DEFAULT_SUMO_END_TIME_S)
 
     sumocfg_path = scenario_dir / "scenario.sumocfg"
     network_path = scenario_dir / "network.net.xml"

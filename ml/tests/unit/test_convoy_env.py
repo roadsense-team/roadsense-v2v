@@ -177,6 +177,11 @@ def test_action_space_is_box_1(env_with_mocks):
     assert env_with_mocks.action_space.high[0] == pytest.approx(1.0)
 
 
+def test_default_max_steps_matches_shorter_route_budget(env_with_mocks):
+    assert env_with_mocks.DEFAULT_MAX_STEPS == 500
+    assert env_with_mocks.max_steps == 500
+
+
 def test_convoy_env_uses_simulate_mesh_step(env_with_mocks, mock_sumo, mock_emulator):
     """_step_espnow delegates to emulator simulate_mesh_step."""
     states = {
