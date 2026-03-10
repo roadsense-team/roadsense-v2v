@@ -54,3 +54,7 @@ _migration_plan
 *.coverage
 *htmlcov
 *.csv
+deep_sets_*.zip
+timeseries_*.npz
+training-run*.log
+events.out.tfevents.*

@@ -120,6 +120,10 @@ class SUMOConnection:
             speed = 0.0
         traci.vehicle.setSpeed(vehicle_id, speed)
 
+    def slow_down(self, vehicle_id: str, speed: float, duration: float) -> None:
+        """Gradually decelerate vehicle to target speed over duration seconds."""
+        traci.vehicle.slowDown(vehicle_id, max(speed, 0.0), duration)
+
     def release_vehicle_speed(self, vehicle_id: str) -> None:
         """Release speed override, returning vehicle to car-following model."""
         traci.vehicle.setSpeed(vehicle_id, -1)

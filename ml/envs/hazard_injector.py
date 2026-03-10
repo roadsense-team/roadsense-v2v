@@ -16,6 +16,10 @@ class HazardInjector:
     HAZARD_WINDOW_START = 150
     HAZARD_WINDOW_END = 350
 
+    STEP_LENGTH = 0.1  # seconds per simulation step
+    BRAKING_DURATION_MIN = 2.0  # seconds
+    BRAKING_DURATION_MAX = 4.0  # seconds
+
     EMERGENCY_BRAKE = "emergency_brake"
     EGO_VEHICLE_ID = "V001"
     TARGET_STRATEGY_NEAREST = "nearest"
@@ -109,6 +113,8 @@ class HazardInjector:
         self._hazard_injection_attempted = False
         self._hazard_injection_failed = False
         self._hazard_injection_failed_reason: Optional[str] = None
+        self._braking_duration: Optional[float] = None
+        self._slowdown_end_step: Optional[int] = None
 
     def reset(self, options: Optional[Dict[str, Any]] = None) -> None:
         self._reset_state(options=options)
@@ -199,12 +205,36 @@ class HazardInjector:
                 )
             return False
 
-        sumo.set_vehicle_speed(target, 0.0)
+        braking_duration = self._rng.uniform(
+            self.BRAKING_DURATION_MIN, self.BRAKING_DURATION_MAX
+        )
+        sumo.slow_down(target, 0.0, braking_duration)
+        self._braking_duration = braking_duration
+        self._slowdown_end_step = step + int(
+            round(braking_duration / self.STEP_LENGTH)
+        )
         self._hazard_injected = True
         self._hazard_target = target
         self._hazard_source_rank_ahead = source_rank_ahead
 
         return True
+
+    def maintain_hazard(self, step: int, sumo: "SUMOConnection") -> None:
+        """Pin hazard target at speed 0 once the gradual slowdown completes.
+
+        Must be called every step from the environment. After the slowDown
+        duration expires, SUMO would return the vehicle to CF control and
+        it would accelerate again. This pins speed=0 to keep the hazard
+        active for the rest of the episode (same reward dynamics as before).
+        """
+        if (
+            self._hazard_injected
+            and self._hazard_target is not None
+            and self._slowdown_end_step is not None
+            and step >= self._slowdown_end_step
+        ):
+            sumo.set_vehicle_speed(self._hazard_target, 0.0)
+            self._slowdown_end_step = None  # Only pin once
 
     def is_in_hazard_window(self, step: int) -> bool:
         return self.HAZARD_WINDOW_START <= step <= self.HAZARD_WINDOW_END
@@ -236,6 +266,10 @@ class HazardInjector:
     @property
     def hazard_injection_failed_reason(self) -> Optional[str]:
         return self._hazard_injection_failed_reason
+
+    @property
+    def braking_duration(self) -> Optional[float]:
+        return self._braking_duration
 
     @property
     def target_strategy(self) -> str:

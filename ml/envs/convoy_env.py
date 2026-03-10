@@ -310,6 +310,9 @@ class ConvoyEnv(gym.Env):
             )
             if hazard_injected and self._hazard_injection_step is None:
                 self._hazard_injection_step = self._step_count
+            self.hazard_injector.maintain_hazard(
+                step=self._step_count, sumo=self.sumo,
+            )
 
         self.sumo.step()
         self._step_count += 1

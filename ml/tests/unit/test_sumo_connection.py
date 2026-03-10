@@ -102,6 +102,20 @@ def test_set_vehicle_speed_negative_clamps_to_zero():
         conn.set_vehicle_speed("V001", -5.0)
         mock_set_speed.assert_called_with("V001", 0.0)
 
+def test_slow_down_calls_traci_slowdown():
+    """slow_down() wraps traci.vehicle.slowDown()."""
+    conn = SUMOConnection("cfg")
+    with patch('traci.vehicle.slowDown') as mock_slow:
+        conn.slow_down("V002", 0.0, 3.0)
+        mock_slow.assert_called_once_with("V002", 0.0, 3.0)
+
+def test_slow_down_clamps_negative_speed_to_zero():
+    """Negative target speed is clamped to 0."""
+    conn = SUMOConnection("cfg")
+    with patch('traci.vehicle.slowDown') as mock_slow:
+        conn.slow_down("V001", -5.0, 2.5)
+        mock_slow.assert_called_once_with("V001", 0.0, 2.5)
+
 def test_step_advances_simulation():
     """step() calls traci.simulationStep()."""
     conn = SUMOConnection("cfg")
