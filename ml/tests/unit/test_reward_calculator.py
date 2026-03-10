@@ -191,17 +191,19 @@ def test_calculate_returns_all_info_fields():
         "reward_safety", "reward_comfort", "reward_appropriateness",
         "reward_early_reaction", "reward_ignoring_hazard", "reward_total",
         "distance", "action_value", "deceleration", "closing_rate",
-        "any_braking_peer",
+        "any_braking_peer", "hazard_source_braking_received",
     ]
     for key in required:
         assert key in info
 
 
-def test_calculate_legacy_fields_are_zero():
+def test_calculate_v2v_terms_zero_during_normal_driving():
+    """Without hazard_source_braking_received, V2V terms stay zero."""
     calc = RewardCalculator()
     _, info = calc.calculate(
         distance=25.0, action_value=0.1, deceleration=1.0,
         closing_rate=0.0, any_braking_peer=True,
+        hazard_source_braking_received=False,
     )
     assert info["reward_early_reaction"] == 0.0
     assert info["reward_ignoring_hazard"] == 0.0
@@ -217,6 +219,8 @@ def test_calculate_total_equals_sum():
         info["reward_safety"]
         + info["reward_comfort"]
         + info["reward_appropriateness"]
+        + info["reward_early_reaction"]
+        + info["reward_ignoring_hazard"]
     )
     assert total == pytest.approx(expected)
 
@@ -317,3 +321,116 @@ def test_safe_plateau_beats_passive_do_nothing_at_ramp():
     assert safe_reward - ramp_mid > 4.0, (
         "Safe zone must dominate mid-ramp by enough to justify braking cost"
     )
+
+
+# ── Hazard-gated V2V response terms (Run 013) ─────────────────────────
+
+
+def test_ignoring_hazard_penalty_when_not_braking():
+    """Penalty fires when hazard source braking received but ego not braking."""
+    calc = RewardCalculator()
+    _, info = calc.calculate(
+        distance=25.0, action_value=0.0, deceleration=0.0,
+        hazard_source_braking_received=True,
+    )
+    assert info["reward_ignoring_hazard"] == pytest.approx(-5.0)
+
+
+def test_ignoring_hazard_penalty_included_in_total():
+    calc = RewardCalculator()
+    total, info = calc.calculate(
+        distance=25.0, action_value=0.0, deceleration=0.0,
+        hazard_source_braking_received=True,
+    )
+    expected = (
+        info["reward_safety"] + info["reward_comfort"]
+        + info["reward_appropriateness"]
+        + info["reward_early_reaction"] + info["reward_ignoring_hazard"]
+    )
+    assert total == pytest.approx(expected)
+    assert info["reward_ignoring_hazard"] < 0
+
+
+def test_no_ignoring_penalty_when_braking():
+    """No penalty when ego is braking in response to hazard."""
+    calc = RewardCalculator()
+    _, info = calc.calculate(
+        distance=25.0, action_value=0.5, deceleration=4.0,
+        hazard_source_braking_received=True,
+    )
+    assert info["reward_ignoring_hazard"] == 0.0
+
+
+def test_no_ignoring_penalty_without_hazard():
+    """During normal driving, penalty is zero regardless of deceleration."""
+    calc = RewardCalculator()
+    _, info = calc.calculate(
+        distance=25.0, action_value=0.0, deceleration=0.0,
+        hazard_source_braking_received=False,
+    )
+    assert info["reward_ignoring_hazard"] == 0.0
+
+
+def test_early_reaction_bonus_when_braking_far():
+    """Bonus when ego brakes while hazard source braking and distance > 15m."""
+    calc = RewardCalculator()
+    _, info = calc.calculate(
+        distance=20.0, action_value=0.5, deceleration=4.0,
+        hazard_source_braking_received=True,
+    )
+    assert info["reward_early_reaction"] == pytest.approx(2.0)
+
+
+def test_no_early_reaction_when_close():
+    """No early reaction bonus when distance < 15m (that's panic braking)."""
+    calc = RewardCalculator()
+    _, info = calc.calculate(
+        distance=10.0, action_value=0.5, deceleration=4.0,
+        hazard_source_braking_received=True,
+    )
+    assert info["reward_early_reaction"] == 0.0
+
+
+def test_no_early_reaction_without_hazard():
+    """No bonus during normal driving."""
+    calc = RewardCalculator()
+    _, info = calc.calculate(
+        distance=20.0, action_value=0.5, deceleration=4.0,
+        hazard_source_braking_received=False,
+    )
+    assert info["reward_early_reaction"] == 0.0
+
+
+def test_ignoring_penalty_at_gentle_threshold_boundary():
+    """At exactly GENTLE_DECEL_THRESHOLD, not braking → penalty."""
+    calc = RewardCalculator()
+    _, info = calc.calculate(
+        distance=25.0, action_value=0.0, deceleration=0.5,
+        hazard_source_braking_received=True,
+    )
+    assert info["reward_ignoring_hazard"] == pytest.approx(-5.0)
+
+    _, info2 = calc.calculate(
+        distance=25.0, action_value=0.1, deceleration=0.6,
+        hazard_source_braking_received=True,
+    )
+    assert info2["reward_ignoring_hazard"] == 0.0
+
+
+def test_braking_during_hazard_always_beats_passive():
+    """At any distance, braking during hazard must produce better reward than
+    ignoring it, thanks to the -5 penalty for ignoring."""
+    calc = RewardCalculator()
+    for dist in [8.0, 12.0, 18.0, 25.0]:
+        total_ignore, _ = calc.calculate(
+            distance=dist, action_value=0.0, deceleration=0.0,
+            closing_rate=0.5, hazard_source_braking_received=True,
+        )
+        total_brake, _ = calc.calculate(
+            distance=dist, action_value=0.3, deceleration=2.4,
+            closing_rate=0.5, hazard_source_braking_received=True,
+        )
+        assert total_brake > total_ignore, (
+            f"At {dist}m, braking ({total_brake:.2f}) must beat "
+            f"ignoring ({total_ignore:.2f})"
+        )

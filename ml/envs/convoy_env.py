@@ -30,7 +30,7 @@ class ConvoyEnv(gym.Env):
     DEFAULT_MAX_STEPS = 500
     COLLISION_DIST = 5.0
     MAX_STARTUP_STEPS = 100
-    BRAKING_ACCEL_THRESHOLD = -3.5
+    BRAKING_ACCEL_THRESHOLD = -2.5
     CF_OVERRIDE_GRACE_STEPS = 3
 
     def __init__(
@@ -356,13 +356,6 @@ class ConvoyEnv(gym.Env):
         if self._step_count >= self.max_steps:
             truncated = True
 
-        reward, reward_info = self.reward_calculator.calculate(
-            distance=distance,
-            action_value=action_value,
-            deceleration=actual_decel,
-            closing_rate=closing_rate,
-        )
-
         hazard_source_id = None
         hazard_step = None
         hazard_source_rank_ahead = None
@@ -374,6 +367,32 @@ class ConvoyEnv(gym.Env):
             hazard_source_rank_ahead = self.hazard_injector.hazard_source_rank_ahead
             hazard_injection_attempted = self.hazard_injector.hazard_injection_attempted
             hazard_injection_failed_reason = self.hazard_injector.hazard_injection_failed_reason
+
+        # Check whether the *injected* hazard source's braking message reached
+        # ego this step.  Gated to the specific target — never true during
+        # normal driving or if no hazard is active.
+        hazard_source_braking_received = False
+        if (
+            self.hazard_injector is not None
+            and self.hazard_injector._hazard_injected
+            and hazard_source_id is not None
+        ):
+            for received in received_map.values():
+                msg = received.message
+                source = msg.source_id or msg.vehicle_id
+                if source == hazard_source_id:
+                    if float(msg.accel_x) <= self.BRAKING_ACCEL_THRESHOLD:
+                        hazard_source_braking_received = True
+                    break
+
+        reward, reward_info = self.reward_calculator.calculate(
+            distance=distance,
+            action_value=action_value,
+            deceleration=actual_decel,
+            closing_rate=closing_rate,
+            any_braking_peer=any_braking_peer_received,
+            hazard_source_braking_received=hazard_source_braking_received,
+        )
 
         mesh_received_source_ids = sorted(received_map.keys())
 

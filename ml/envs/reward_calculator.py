@@ -1,10 +1,13 @@
 """
 Reward calculation utilities for ConvoyEnv.
 
-Run 009 — Linear Ramp + Active V2V incentive.
-Replaces discrete zone boundaries with a continuous gradient from 5m to 20m,
-plus distance-scaled comfort suppression so braking is cheap when it matters.
-Steeper ramp (+9 span) and harsher far penalty make active braking beat passive CF.
+Run 013 — Linear Ramp + Hazard-Gated V2V Response Terms.
+Builds on Run 009 ramp structure. Adds two hazard-conditioned terms:
+  - PENALTY_IGNORING_HAZARD: fires when the injected hazard source is braking
+    AND ego has received that message AND ego is not braking.  Training-only
+    (gated to injected hazard source, never fires during normal driving).
+  - REWARD_EARLY_REACTION: bonus when ego brakes while hazard source is braking
+    AND distance is still > EARLY_REACTION_DIST.  Teaches V2V signal usage.
 """
 
 from typing import Dict, Tuple
@@ -49,6 +52,10 @@ class RewardCalculator:
 
     MISSED_WARNING_DIST = 10.0
     CLOSING_RATE_THRESHOLD = 0.5
+
+    PENALTY_IGNORING_HAZARD = -5.0
+    REWARD_EARLY_REACTION = 2.0
+    EARLY_REACTION_DIST = 15.0
 
     def _safety_reward(self, distance: float) -> float:
         """Calculate safety reward with continuous linear ramp."""
@@ -124,8 +131,16 @@ class RewardCalculator:
         deceleration: float,
         closing_rate: float = 0.0,
         any_braking_peer: bool = False,
+        hazard_source_braking_received: bool = False,
     ) -> Tuple[float, Dict]:
-        """Calculate total reward for current step."""
+        """Calculate total reward for current step.
+
+        hazard_source_braking_received: True when the *injected* hazard source
+        is actively braking AND ego has received that source's V2V message this
+        step.  Gated to the specific hazard target — never True during normal
+        driving.  Used to compute ignoring-hazard penalty and early-reaction
+        bonus.
+        """
         safety = self._safety_reward(distance)
         base_comfort = self._comfort_penalty(deceleration)
         multiplier = self._comfort_multiplier(distance)
@@ -133,10 +148,23 @@ class RewardCalculator:
         appropriateness = self._appropriateness_reward(
             distance, deceleration, closing_rate
         )
+
         early_reaction = 0.0
         ignoring_hazard = 0.0
 
-        total = safety + comfort + appropriateness
+        if hazard_source_braking_received:
+            decel_abs = abs(deceleration)
+            is_braking = decel_abs > self.GENTLE_DECEL_THRESHOLD
+
+            if not is_braking:
+                ignoring_hazard = self.PENALTY_IGNORING_HAZARD
+            elif distance > self.EARLY_REACTION_DIST:
+                early_reaction = self.REWARD_EARLY_REACTION
+
+        total = (
+            safety + comfort + appropriateness
+            + early_reaction + ignoring_hazard
+        )
 
         info = {
             "reward_safety": safety,
@@ -150,6 +178,7 @@ class RewardCalculator:
             "deceleration": deceleration,
             "closing_rate": closing_rate,
             "any_braking_peer": any_braking_peer,
+            "hazard_source_braking_received": hazard_source_braking_received,
         }
 
         return total, info
