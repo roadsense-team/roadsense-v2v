@@ -200,8 +200,11 @@ def test_hazard_reward_terms_disabled(make_env):
                 np.array([0.0], dtype=np.float32)  # No braking
             )
 
-            assert step_info.get("reward_early_reaction", 0.0) == pytest.approx(0.0)
-            assert step_info.get("reward_ignoring_hazard", 0.0) == pytest.approx(0.0)
+            # V2V hazard terms are now active (Run 013). During a forced hazard
+            # with action=0, ignoring_hazard may fire once the hazard source's
+            # braking message reaches ego.  Verify value is in expected range.
+            assert step_info.get("reward_ignoring_hazard", 0.0) >= -5.0
+            assert step_info.get("reward_early_reaction", 0.0) >= 0.0
 
             if terminated or truncated:
                 break
