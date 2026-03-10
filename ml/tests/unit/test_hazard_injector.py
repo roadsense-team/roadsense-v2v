@@ -26,6 +26,7 @@ def _make_sumo(vehicle_states):
     mock.is_vehicle_active.side_effect = lambda vid: vid in ids
     mock.get_vehicle_state.side_effect = lambda vid: state_map[vid]
     mock.set_vehicle_speed = Mock()
+    mock.slow_down = Mock()
     return mock
 
 
@@ -67,7 +68,7 @@ def test_hazard_injector_only_injects_in_window(mock_sumo):
 
 
 def test_hazard_targets_nearest_peer(mock_sumo):
-    """Nearest strategy targets nearest front peer."""
+    """Nearest strategy targets nearest front peer with gradual slowdown."""
     inj = HazardInjector(seed=42)
     inj._episode_will_have_hazard = True
     inj._hazard_step = 50
@@ -75,7 +76,12 @@ def test_hazard_targets_nearest_peer(mock_sumo):
 
     inj.maybe_inject(step=50, sumo=mock_sumo)
 
-    mock_sumo.set_vehicle_speed.assert_called_once_with("V002", 0.0)
+    mock_sumo.slow_down.assert_called_once()
+    call_args = mock_sumo.slow_down.call_args
+    assert call_args[0][0] == "V002"
+    assert call_args[0][1] == 0.0
+    duration = call_args[0][2]
+    assert 2.0 <= duration <= 4.0
     assert inj.hazard_target == "V002"
 
 
@@ -95,7 +101,8 @@ def test_hazard_targets_closest_among_multiple_peers():
 
     inj.maybe_inject(step=50, sumo=sumo)
 
-    sumo.set_vehicle_speed.assert_called_once_with("V003", 0.0)
+    sumo.slow_down.assert_called_once()
+    assert sumo.slow_down.call_args[0][0] == "V003"
     assert inj.hazard_target == "V003"
     assert inj.hazard_source_rank_ahead == 1
 
@@ -114,7 +121,7 @@ def test_hazard_skips_when_no_peers():
     result = inj.maybe_inject(step=50, sumo=sumo)
 
     assert result is False
-    sumo.set_vehicle_speed.assert_not_called()
+    sumo.slow_down.assert_not_called()
 
 
 def test_hazard_skips_when_ego_not_active():
@@ -131,7 +138,7 @@ def test_hazard_skips_when_ego_not_active():
     result = inj.maybe_inject(step=50, sumo=sumo)
 
     assert result is False
-    sumo.set_vehicle_speed.assert_not_called()
+    sumo.slow_down.assert_not_called()
 
 
 def test_hazard_injector_returns_true_when_injected(mock_sumo):
@@ -161,7 +168,7 @@ def test_hazard_injector_only_fires_once(mock_sumo):
     inj.maybe_inject(step=50, sumo=mock_sumo)
     inj.maybe_inject(step=50, sumo=mock_sumo)
 
-    assert mock_sumo.set_vehicle_speed.call_count == 1
+    assert mock_sumo.slow_down.call_count == 1
 
 
 def test_hazard_reset_clears_target():
@@ -185,7 +192,7 @@ def test_hazard_ignores_peers_behind_ego():
     result = inj.maybe_inject(step=50, sumo=sumo)
 
     assert result is False
-    sumo.set_vehicle_speed.assert_not_called()
+    sumo.slow_down.assert_not_called()
 
 
 def test_uniform_front_peers_samples_multiple_sources():
@@ -228,7 +235,8 @@ def test_fixed_vehicle_id_targets_requested_front_vehicle():
     result = inj.maybe_inject(step=50, sumo=sumo)
 
     assert result is True
-    sumo.set_vehicle_speed.assert_called_once_with("V003", 0.0)
+    sumo.slow_down.assert_called_once()
+    assert sumo.slow_down.call_args[0][0] == "V003"
     assert inj.hazard_source_rank_ahead == 2
 
 
@@ -247,7 +255,7 @@ def test_fixed_vehicle_id_missing_returns_false():
     inj._hazard_step = 50
 
     assert inj.maybe_inject(step=50, sumo=sumo) is False
-    sumo.set_vehicle_speed.assert_not_called()
+    sumo.slow_down.assert_not_called()
 
 
 def test_fixed_vehicle_id_behind_ego_returns_false():
@@ -266,7 +274,7 @@ def test_fixed_vehicle_id_behind_ego_returns_false():
     inj._hazard_step = 50
 
     assert inj.maybe_inject(step=50, sumo=sumo) is False
-    sumo.set_vehicle_speed.assert_not_called()
+    sumo.slow_down.assert_not_called()
 
 
 def test_fixed_rank_ahead_targets_requested_rank():
@@ -288,7 +296,8 @@ def test_fixed_rank_ahead_targets_requested_rank():
     result = inj.maybe_inject(step=50, sumo=sumo)
 
     assert result is True
-    sumo.set_vehicle_speed.assert_called_once_with("V003", 0.0)
+    sumo.slow_down.assert_called_once()
+    assert sumo.slow_down.call_args[0][0] == "V003"
     assert inj.hazard_source_rank_ahead == 2
 
 
@@ -307,3 +316,106 @@ def test_reset_options_override_target_strategy_and_schedule():
     assert inj.target_strategy == HazardInjector.TARGET_STRATEGY_FIXED_RANK_AHEAD
     assert inj.hazard_step == 160
     assert inj._episode_will_have_hazard is True
+
+
+# --- New tests for gradual hazard injection ---
+
+
+def test_braking_duration_randomized_in_range(mock_sumo):
+    """Braking duration is randomized between 2.0 and 4.0 seconds."""
+    durations = set()
+    for seed in range(100):
+        inj = HazardInjector(seed=seed)
+        inj._episode_will_have_hazard = True
+        inj._hazard_step = 200
+        inj._hazard_injected = False
+        inj.maybe_inject(step=200, sumo=mock_sumo)
+        if inj.braking_duration is not None:
+            durations.add(round(inj.braking_duration, 2))
+            assert 2.0 <= inj.braking_duration <= 4.0
+
+    # Should have variety (not all the same value)
+    assert len(durations) > 10
+
+
+def test_slowdown_end_step_computed_correctly(mock_sumo):
+    """_slowdown_end_step = injection_step + round(duration / 0.1)."""
+    inj = HazardInjector(seed=42)
+    inj._episode_will_have_hazard = True
+    inj._hazard_step = 200
+    inj._hazard_injected = False
+
+    inj.maybe_inject(step=200, sumo=mock_sumo)
+
+    expected_end = 200 + int(round(inj.braking_duration / 0.1))
+    assert inj._slowdown_end_step == expected_end
+
+
+def test_maintain_hazard_pins_speed_after_slowdown(mock_sumo):
+    """After slowdown duration, maintain_hazard pins target at speed 0."""
+    inj = HazardInjector(seed=42)
+    inj._episode_will_have_hazard = True
+    inj._hazard_step = 200
+    inj._hazard_injected = False
+
+    inj.maybe_inject(step=200, sumo=mock_sumo)
+    end_step = inj._slowdown_end_step
+
+    # Before slowdown ends: no setSpeed call
+    inj.maintain_hazard(step=end_step - 1, sumo=mock_sumo)
+    mock_sumo.set_vehicle_speed.assert_not_called()
+
+    # At slowdown end: pins speed to 0
+    inj.maintain_hazard(step=end_step, sumo=mock_sumo)
+    mock_sumo.set_vehicle_speed.assert_called_once_with("V002", 0.0)
+
+
+def test_maintain_hazard_only_pins_once(mock_sumo):
+    """After pinning, maintain_hazard does not call setSpeed again."""
+    inj = HazardInjector(seed=42)
+    inj._episode_will_have_hazard = True
+    inj._hazard_step = 200
+    inj._hazard_injected = False
+
+    inj.maybe_inject(step=200, sumo=mock_sumo)
+    end_step = inj._slowdown_end_step
+
+    inj.maintain_hazard(step=end_step, sumo=mock_sumo)
+    inj.maintain_hazard(step=end_step + 1, sumo=mock_sumo)
+    inj.maintain_hazard(step=end_step + 10, sumo=mock_sumo)
+
+    assert mock_sumo.set_vehicle_speed.call_count == 1
+
+
+def test_maintain_hazard_noop_before_injection(mock_sumo):
+    """maintain_hazard is safe to call before any hazard injection."""
+    inj = HazardInjector(seed=42)
+    inj.reset()
+
+    # Should not raise or call anything
+    inj.maintain_hazard(step=100, sumo=mock_sumo)
+    mock_sumo.set_vehicle_speed.assert_not_called()
+    mock_sumo.slow_down.assert_not_called()
+
+
+def test_reset_clears_braking_duration_and_slowdown_end():
+    """Reset clears gradual-braking tracking fields."""
+    inj = HazardInjector(seed=42)
+    inj._braking_duration = 3.0
+    inj._slowdown_end_step = 250
+    inj.reset()
+    assert inj.braking_duration is None
+    assert inj._slowdown_end_step is None
+
+
+def test_no_set_vehicle_speed_on_injection(mock_sumo):
+    """maybe_inject uses slow_down, NOT set_vehicle_speed."""
+    inj = HazardInjector(seed=42)
+    inj._episode_will_have_hazard = True
+    inj._hazard_step = 200
+    inj._hazard_injected = False
+
+    inj.maybe_inject(step=200, sumo=mock_sumo)
+
+    mock_sumo.slow_down.assert_called_once()
+    mock_sumo.set_vehicle_speed.assert_not_called()

@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 011 - User-Data Template
+# RoadSense Training Run 012 - Gradual Hazard Injection
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,21 +10,21 @@
 #   TOTAL_STEPS   - Training timesteps (default: 10000000)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 011 Formation Stability Fix:
-#   - NEW: Peer departPos redistributed with 25-50m spacing (was 5.9-22m)
-#     Fixes SUMO safe-insertion stagger + CF compression to bumper-to-bumper
-#   - NEW: Episode shortened from 1000 to 500 steps (50s) to fit 785m route
-#   - NEW: Hazard window moved from steps 30-80 to 150-350 (sim seconds ~21-41)
-#   - NEW: sumocfg end time reduced from 120s to 65s
-#   - NEW: 40 eval scenarios (was 10), 8 per peer count n=1-5
-#   - Eval capability audit: 15/15 buckets, zero failures
-#   - CF override, reward, stability params all unchanged from Run 010
-#   - Dataset: dataset_v6/base_real (formation-fixed, 100% real-grounded)
+# Run 012 Gradual Hazard Injection (sim-to-real fix):
+#   - NEW: Hazard injection uses slowDown(0, 2-4s) instead of setSpeed(0)
+#     Fixes sim-to-real gap: model now sees gradual peer deceleration
+#     matching real-world braking physics (-3.5 to -7.0 m/s²)
+#   - NEW: Domain randomization on braking duration (2.0-4.0s per episode)
+#   - NEW: maintain_hazard() pins target at 0 after slowdown completes
+#   - Unchanged: CF override, reward, Deep Sets, hyperparams, formation fix
+#   - Dataset: dataset_v7/base_real (same generation params as v6)
+#   - Goal: Model reacts to V2V braking SIGNAL at distance, not just
+#     closing-rate+proximity consequence (see H5_SIM_TO_REAL_ANALYSIS.md)
 # =============================================================================
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_011"
+RUN_ID="cloud_prod_012"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=10000000
 S3_BUCKET="saferide-training-results"
@@ -33,7 +33,7 @@ S3_BUCKET="saferide-training-results"
 export AWS_DEFAULT_REGION=il-central-1
 export AWS_REGION="$AWS_DEFAULT_REGION"
 WORK_DIR="/home/ubuntu/work"
-DATASET_DIR="ml/scenarios/datasets/dataset_v6"
+DATASET_DIR="ml/scenarios/datasets/dataset_v7"
 EMULATOR_PARAMS="ml/espnow_emulator/emulator_params_measured.json"
 
 # -------------------------------------------------------------------
@@ -88,8 +88,8 @@ echo "[2/7] Rebuilding Docker image (cached - should be fast)..."
 cd "$WORK_DIR/ml"
 docker build -t roadsense-ml:latest .
 
-# 3. Generate dataset_v6 from base_real
-echo "[3/7] Generating dataset_v6 from base_real..."
+# 3. Generate dataset_v7 from base_real
+echo "[3/7] Generating dataset_v7 from base_real..."
 cd "$WORK_DIR"
 ./ml/run_docker.sh generate \
     --base_dir ml/scenarios/base_real \
