@@ -357,6 +357,79 @@ def test_convoy_env_any_braking_peer_not_triggered_by_low_speed_only(
     assert any_braking_peer is False
 
 
+def test_hazard_source_braking_signal_latches_across_steps(
+    env_with_mocks,
+    mock_sumo,
+    mock_emulator,
+):
+    """Once the injected source is seen braking, hazard reward stays active."""
+    env_with_mocks.reset()
+
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0, speed=12.0),
+        "V002": _make_state("V002", x=0.0, y=25.0, speed=8.0),
+        "V003": _make_state("V003", x=0.0, y=50.0, speed=8.0),
+    }
+    _set_states(mock_sumo, states)
+    mock_sumo.get_active_vehicle_ids.return_value = ["V001", "V002", "V003"]
+
+    hazard = Mock()
+    hazard.maybe_inject = Mock(return_value=False)
+    hazard.maintain_hazard = Mock()
+    hazard._hazard_injected = True
+    hazard.hazard_target = "V002"
+    hazard.hazard_step = 200
+    hazard.hazard_source_rank_ahead = 1
+    hazard.hazard_injection_attempted = True
+    hazard.hazard_injection_failed_reason = None
+    env_with_mocks.hazard_injector = hazard
+
+    mock_emulator.simulate_mesh_step.side_effect = [
+        {
+            "V002": _make_received_message(
+                "V002",
+                x=0.0,
+                y=25.0,
+                age_ms=10,
+                hop_count=0,
+                speed=6.0,
+                accel_x=-3.2,
+            ),
+        },
+        {
+            "V002": _make_received_message(
+                "V002",
+                x=0.0,
+                y=24.0,
+                age_ms=10,
+                hop_count=0,
+                speed=0.0,
+                accel_x=0.0,
+            ),
+        },
+    ]
+
+    _, _, _, _, info1 = env_with_mocks.step(np.array([0.0], dtype=np.float32))
+    _, _, _, _, info2 = env_with_mocks.step(np.array([0.0], dtype=np.float32))
+
+    assert info1["hazard_source_braking_received"] is True
+    assert info1["reward_ignoring_hazard"] == pytest.approx(-5.0)
+
+    # Pre-fix bug: this became False as soon as slowDown() ended and accel_x=0.
+    assert info2["hazard_source_braking_received"] is True
+    assert info2["reward_ignoring_hazard"] == pytest.approx(-5.0)
+
+
+def test_reset_clears_hazard_source_braking_latch(env_with_mocks):
+    """Episode reset must clear the latched hazard-source braking signal."""
+    env_with_mocks.reset()
+    env_with_mocks._hazard_source_braking_latched = True
+
+    env_with_mocks.reset()
+
+    assert env_with_mocks._hazard_source_braking_latched is False
+
+
 def test_step_accepts_float_action(env_with_mocks):
     """step() accepts scalar float action."""
     env_with_mocks.reset()

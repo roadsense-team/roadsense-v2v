@@ -19,7 +19,7 @@ SUMO_AVAILABLE = os.system("sumo --version > /dev/null 2>&1") == 0
 def base_scenario_path():
     """Path to base SUMO scenario with multiple peers."""
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    return os.path.join(base_dir, "scenarios", "base", "scenario.sumocfg")
+    return os.path.join(base_dir, "scenarios", "base_real", "scenario.sumocfg")
 
 
 @pytest.fixture
@@ -208,6 +208,71 @@ def test_hazard_reward_terms_disabled(make_env):
 
             if terminated or truncated:
                 break
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+@pytest.mark.skipif(not SUMO_AVAILABLE, reason="SUMO not installed")
+def test_ignoring_hazard_penalty_persists_past_active_slowdown(make_env):
+    """
+    Once the injected source's braking signal reaches ego, the ignoring-hazard
+    penalty should persist for the rest of the hazard event, not only during
+    the 2-4s active slowDown() window.
+
+    Directly tests the latch: after slowDown is guaranteed complete (hazard_step
+    + max_slowdown_steps), asserts penalty is still active on every non-terminal
+    step until the episode ends.
+    """
+    from ml.envs.hazard_injector import HazardInjector
+
+    hazard_step = 80
+    max_slowdown_steps = int(
+        HazardInjector.BRAKING_DURATION_MAX / HazardInjector.STEP_LENGTH
+    )  # 40
+    slowdown_done_step = hazard_step + max_slowdown_steps  # 120
+
+    env = make_env(max_steps=260)
+    env.hazard_injector.HAZARD_WINDOW_START = 0
+    obs, info = env.reset(seed=0, options={
+        "hazard_options": {"force_hazard": True, "hazard_step": hazard_step},
+    })
+
+    first_penalty_step = None
+    post_slowdown_penalty = 0
+    post_slowdown_no_penalty = 0
+
+    for step in range(260):
+        obs, reward, terminated, truncated, step_info = env.step(
+            np.array([0.0], dtype=np.float32)
+        )
+
+        has_penalty = step_info.get("reward_ignoring_hazard", 0.0) < 0.0
+
+        if has_penalty and first_penalty_step is None:
+            first_penalty_step = step
+
+        # After slowDown is guaranteed complete, track whether penalty persists
+        if step > slowdown_done_step and not (terminated or truncated):
+            if has_penalty:
+                post_slowdown_penalty += 1
+            else:
+                post_slowdown_no_penalty += 1
+
+        if terminated or truncated:
+            break
+
+    assert first_penalty_step is not None, (
+        "Ignoring-hazard penalty never activated after forced hazard injection."
+    )
+    assert post_slowdown_penalty > 0, (
+        f"No ignoring-hazard penalty detected after slowDown window "
+        f"(step {slowdown_done_step}). The latch is not working."
+    )
+    assert post_slowdown_no_penalty == 0, (
+        f"Ignoring-hazard penalty had {post_slowdown_no_penalty} gap(s) "
+        f"after slowDown completed (step {slowdown_done_step}). "
+        f"The latch dropped before episode end."
+    )
 
 
 # --- Test 6: Eval matrix coverage with small run ---

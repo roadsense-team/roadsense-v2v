@@ -10,13 +10,13 @@ import pytest
 def scenario_path():
     """Path to base SUMO scenario."""
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    return os.path.join(base_dir, "scenarios", "base", "scenario.sumocfg")
+    return os.path.join(base_dir, "scenarios", "base_real", "scenario.sumocfg")
 
 
 @pytest.fixture
 def dataset_dir(tmp_path):
     """Create a minimal dataset directory for integration tests."""
-    base_dir = Path(__file__).resolve().parents[2] / "scenarios" / "base"
+    base_dir = Path(__file__).resolve().parents[2] / "scenarios" / "base_real"
     dataset_root = tmp_path / "dataset_v1"
     dataset_root.mkdir(parents=True, exist_ok=True)
 

@@ -9,7 +9,7 @@
   },
   "hard_braking_peak_ms2": -8.63,
   "location": "Rural road outside Deir Hanna, near Sonol station by Nahal Tzalmon, between Mghar and Eilaboun",
-  "notes": "Ego-only mesh recording. V002/V003 trajectories extracted from V001 RX log. V004-V006 are synthetic peers placed ahead of V003.",
+  "notes": "Ego-only mesh recording. V002/V003 trajectories extracted from V001 RX log. V004-V006 are synthetic peers required for n=3-5 peer dropout. departPos redistributed to 25m gaps (scenario_layout.py) to avoid SUMO safe-insertion stagger. Original recorded spacing was ~14m avg but V002-V003 gap (5.9m) violated SUMO threshold (9.6m).",
   "recording_date": "2026-02-28",
   "source_files": {
     "rx": "Convoy_recording_02282026/V001_rx_004.csv",
