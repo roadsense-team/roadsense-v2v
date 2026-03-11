@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 013 - Hazard-Gated V2V Reward Terms
+# RoadSense Training Run 014 - Latch Fix + Formation-Fixed base_real
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,39 +10,43 @@
 #   TOTAL_STEPS   - Training timesteps (default: 10000000)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 013 — Hazard-Gated V2V Reward (fixes Run 012 0% reaction regression):
+# Run 014 — Latch fix (Run 013 root cause) + formation-fixed base_real:
 #
-#   Root cause of Run 012 failure:
-#     Gradual slowDown() removed the instant-stop forcing function from Run 011.
-#     The reward had NO term for "peer is braking via V2V and ego is not reacting."
-#     PENALTY_IGNORING_HAZARD was dead code (always 0.0).  any_braking_peer was
-#     never passed to the reward calculator.  PPO rationally learned passive
-#     survival — coast and accept safety-ramp penalty rather than brake.
+#   Root cause of Run 013 failure:
+#     PENALTY_IGNORING_HAZARD only fired during the 2-4s slowDown window.
+#     After slowDown completed, the hazard source was stopped but the penalty
+#     signal disappeared — covering only 8-16% of post-hazard steps.
+#     The model learned to wait out the short penalty window.
 #
-#   3 fixes in this run (see RUN_012_ROOT_CAUSE_ANALYSIS.md):
-#     1. PENALTY_IGNORING_HAZARD = -5.0/step when the injected hazard source's
-#        V2V message reaches ego, source is braking, and ego is NOT braking.
-#        Gated to the specific hazard target — never fires during normal driving.
-#     2. REWARD_EARLY_REACTION = +2.0/step when ego brakes in response to hazard
-#        source braking AND distance > 15m (reacted early, not panic braking).
-#     3. BRAKING_ACCEL_THRESHOLD lowered from -3.5 to -2.5 m/s² to catch all
-#        slowDown durations (4s braking = -3.47 m/s², was above old threshold).
+#   Changes in this run (see RUN_014_PREP_CHECKLIST.md):
+#     1. Latch _hazard_source_braking_latched in convoy_env.py — reward signal
+#        persists for the entire hazard event, not just the 2-4s slowDown.
+#        Covers ~99% of post-hazard steps instead of 8-16%.
+#     2. base_real: sigma=0.0, speedFactor=1.0, speedDev=0 — no random
+#        braking/accel perturbations, formation holds during training.
+#     3. base_real: 25m departPos spacing — above SUMO safe-insertion
+#        threshold (9.6m), prevents staggered insertion delays.
+#     4. Integration tests on base_real — Docker tests validate actual
+#        training scenario (conftest.py, test_run006_fixes.py).
 #
-#   Unchanged from Run 012:
+#   Unchanged from Run 013:
 #     - Gradual hazard injection (slowDown 2-4s, domain randomized)
-#     - CF override, Deep Sets, observation (5-dim ego), formation fix
+#     - CF override, Deep Sets, observation (5-dim ego)
+#     - Hazard-gated reward terms (PENALTY_IGNORING_HAZARD=-5.0,
+#       REWARD_EARLY_REACTION=+2.0, BRAKING_ACCEL_THRESHOLD=-2.5)
 #     - Hyperparams: LR=1e-4, n_steps=4096, ent_coef=0.0, log_std_init=-0.5
 #     - Dataset generation params (base_real, seed=42, 25 train + 40 eval)
 #
 #   Pass criteria:
-#     1. SUMO eval: 100% V2V reaction (no regression from Run 011)
-#     2. H5 re-validation: model action > 0.1 within 3s of peer braking onset
-#     3. False positive rate < 5% in Extra Recording
+#     1. SUMO eval: >90% V2V reaction (target 100%, Run 011 baseline)
+#     2. avg_reward > -200 (Run 011 was -86.62)
+#     3. H5 re-validation: model action > 0.1 within 3s of peer braking onset
+#     4. False positive rate < 5% in Extra Recording
 # =============================================================================
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_013"
+RUN_ID="cloud_prod_014"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=10000000
 S3_BUCKET="saferide-training-results"

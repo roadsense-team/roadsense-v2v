@@ -12,7 +12,7 @@ class HazardInjector:
     selection strategies.
     """
 
-    HAZARD_PROBABILITY = 0.5
+    HAZARD_PROBABILITY = 1.0
     HAZARD_WINDOW_START = 150
     HAZARD_WINDOW_END = 350
 

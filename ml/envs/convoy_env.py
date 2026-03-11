@@ -103,6 +103,7 @@ class ConvoyEnv(gym.Env):
         self._sumo_started = False
         self._hazard_injection_step: Optional[int] = None
         self._cf_override_active = False
+        self._hazard_source_braking_latched = False
 
         self.observation_space = spaces.Dict({
             "ego": spaces.Box(
@@ -182,6 +183,7 @@ class ConvoyEnv(gym.Env):
         self._step_count = 0
         self._hazard_injection_step = None
         self._cf_override_active = False
+        self._hazard_source_braking_latched = False
 
         scenario_id = None
         if self.scenario_manager is not None:
@@ -371,9 +373,10 @@ class ConvoyEnv(gym.Env):
         # Check whether the *injected* hazard source's braking message reached
         # ego this step.  Gated to the specific target — never true during
         # normal driving or if no hazard is active.
-        hazard_source_braking_received = False
+        hazard_source_braking_received = self._hazard_source_braking_latched
         if (
-            self.hazard_injector is not None
+            not self._hazard_source_braking_latched
+            and self.hazard_injector is not None
             and self.hazard_injector._hazard_injected
             and hazard_source_id is not None
         ):
@@ -382,8 +385,18 @@ class ConvoyEnv(gym.Env):
                 source = msg.source_id or msg.vehicle_id
                 if source == hazard_source_id:
                     if float(msg.accel_x) <= self.BRAKING_ACCEL_THRESHOLD:
+                        self._hazard_source_braking_latched = True
                         hazard_source_braking_received = True
                     break
+        elif self._hazard_source_braking_latched:
+            hazard_source_braking_received = True
+
+        if (
+            self.hazard_injector is not None
+            and not self.hazard_injector._hazard_injected
+        ):
+            self._hazard_source_braking_latched = False
+            hazard_source_braking_received = False
 
         reward, reward_info = self.reward_calculator.calculate(
             distance=distance,
