@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 017 - Diagnostic Critic Recovery
+# RoadSense Training Run 018 - Signal Strength + Reward Normalization
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,29 +10,40 @@
 #   TOTAL_STEPS   - Training timesteps (default: 2000000 for diagnostic run)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 017 — Diagnostic fix package for the dead critic in Runs 014-016:
+# Run 018 — Fix the dead critic (explained_variance=0 in Runs 014-017):
 #
-#   Merged diagnosis:
-#     1. Reward and observation were keyed off different latches.
-#     2. Hidden hazard timing remained partly unobservable to the critic.
-#     3. A stopped ego could still take the ignoring-hazard penalty.
+#   Root cause (confirmed by 5 consecutive failed runs):
+#     Gradual slowDown (2-4s) produces peer accel of ~-4.6 m/s^2 (normalized
+#     -0.46), which OVERLAPS with normal car-following adjustments (-0.3 to
+#     -0.5). The critic cannot distinguish hazard from normal driving in the
+#     observation space. explained_variance=0 is the mathematically correct
+#     answer: identical-looking states genuinely map to different returns.
 #
-#   Changes in this run:
-#     1. Reward now keys off the same latched braking_received bit the policy
-#        sees in ego[5] (old hazard-source path kept only for instrumentation).
-#     2. Ego observation is now 7-dim: ego[6] = current_step / max_steps.
-#        DeepSetExtractor features_dim becomes 39 (32 embed + 7 ego).
-#     3. HazardInjector defaults are diagnostic:
-#        HAZARD_PROBABILITY=1.0 and DEFAULT_HAZARD_STEP=200.
-#     4. Stopped-car penalty bug fixed: ignoring-hazard penalty is suppressed
-#        when ego_speed <= 0.5 m/s.
-#     5. braking_received intentionally remains PRE-CONE for this diagnostic run
-#        to avoid adding another variable; reward is aligned to that same bit.
-#     6. New telemetry tracks obs/reward divergence and stop-suppression events.
+#     Run 011 (last success, explained_variance=0.956) used setSpeed(0) which
+#     produced an instant -10.0 m/s^2 signal — unmistakable in the observation.
 #
-#   Retained from prior runs:
-#     - Gradual hazard injection (slowDown 2-4s, domain randomized)
-#     - CF override, Deep Sets
+#   Changes in this run (2 fixes):
+#     1. FASTER SLOWDOWN: BRAKING_DURATION 2-4s -> 0.5-1.5s.
+#        At 13.9 m/s convoy speed: produces -9.3 to -27.8 m/s^2 (clamped to
+#        -10.0 by VehicleState), matching Run 011's signal strength.
+#        Still gradual (slowDown, not setSpeed) for sim-to-real validity.
+#        Real emergency braking at -8.6 m/s^2 takes ~1.6s from 50 km/h.
+#     2. REWARD NORMALIZATION: VecNormalize(norm_obs=False, norm_reward=True).
+#        Raw returns span -2500 to +2000 with no normalization.
+#        Value function now learns from unit-scale targets.
+#
+#   Also includes (from Codex):
+#     3. Warmup contamination fix: braking_received latch cannot be set during
+#        pre-episode warmup (update_braking_latch=False + explicit reset).
+#
+#   Retained from Run 017 (all 5 structural fixes still active):
+#     - Reward aligned to observation braking_received latch (Fix 1)
+#     - Progress feature ego[6] = step/max_steps, 7-dim ego (Fix 2)
+#     - Fixed hazard timing: HAZARD_PROBABILITY=1.0, step=200 (Fix 3)
+#     - Speed-gated penalty: suppressed when ego_speed <= 0.5 m/s (Fix 4)
+#     - Instrumentation: obs/reward divergence, stop-suppression (Fix 5)
+#     - braking_received remains PRE-CONE
+#     - CF override, Deep Sets, features_dim=39
 #     - base_real: sigma=0.0, speedFactor=1.0, speedDev=0, 25m spacing
 #     - Hazard-gated reward terms (PENALTY_IGNORING_HAZARD=-5.0,
 #       REWARD_EARLY_REACTION=+2.0, BRAKING_ACCEL_THRESHOLD=-2.5)
@@ -49,11 +60,15 @@
 #     2. SUMO eval at 1M: >=70% V2V reaction
 #     3. No regression in collision rate
 #     4. If alive at 1M, continue to 2M and decide whether to extend later
+#
+#   Kill criteria (same as Run 017):
+#     - explained_variance=0 at 300k
+#     - V2V reaction=0% at first checkpoint
 # =============================================================================
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_017"
+RUN_ID="cloud_prod_018"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=2000000
 S3_BUCKET="saferide-training-results"

@@ -89,7 +89,7 @@ def test_hazard_targets_nearest_peer(mock_sumo):
     assert call_args[0][0] == "V002"
     assert call_args[0][1] == 0.0
     duration = call_args[0][2]
-    assert 2.0 <= duration <= 4.0
+    assert 0.5 <= duration <= 1.5
     assert inj.hazard_target == "V002"
 
 
@@ -330,7 +330,7 @@ def test_reset_options_override_target_strategy_and_schedule():
 
 
 def test_braking_duration_randomized_in_range(mock_sumo):
-    """Braking duration is randomized between 2.0 and 4.0 seconds."""
+    """Braking duration is randomized between 0.5 and 1.5 seconds."""
     durations = set()
     for seed in range(100):
         inj = HazardInjector(seed=seed)
@@ -340,7 +340,7 @@ def test_braking_duration_randomized_in_range(mock_sumo):
         inj.maybe_inject(step=200, sumo=mock_sumo)
         if inj.braking_duration is not None:
             durations.add(round(inj.braking_duration, 2))
-            assert 2.0 <= inj.braking_duration <= 4.0
+            assert 0.5 <= inj.braking_duration <= 1.5
 
     # Should have variety (not all the same value)
     assert len(durations) > 10

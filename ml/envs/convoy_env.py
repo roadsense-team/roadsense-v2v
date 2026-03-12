@@ -230,7 +230,11 @@ class ConvoyEnv(gym.Env):
             # Feed emulator so it has message history when RL starts
             ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
             current_time_ms = int(self.sumo.get_simulation_time() * 1000)
-            self._step_espnow(ego_state, current_time_ms)
+            self._step_espnow(
+                ego_state,
+                current_time_ms,
+                update_braking_latch=False,
+            )
 
         # Extend warmup if ground-truth distance is too close
         ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
@@ -245,7 +249,15 @@ class ConvoyEnv(gym.Env):
                 raise RuntimeError("V001 left simulation during warmup extension.")
             ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
             current_time_ms = int(self.sumo.get_simulation_time() * 1000)
-            self._step_espnow(ego_state, current_time_ms)
+            self._step_espnow(
+                ego_state,
+                current_time_ms,
+                update_braking_latch=False,
+            )
+
+        # Warmup is pre-episode stabilization. Do not carry warmup braking
+        # events into the RL episode latch.
+        self._braking_received_latched = False
 
         if self.hazard_injector is not None:
             hazard_options = self._extract_hazard_options(options)
@@ -449,6 +461,7 @@ class ConvoyEnv(gym.Env):
         ego_state: VehicleState,
         current_time_ms: int,
         progress: float = 0.0,
+        update_braking_latch: bool = True,
     ) -> Tuple[
         Dict[str, np.ndarray],
         List[VehicleState],
@@ -511,7 +524,7 @@ class ConvoyEnv(gym.Env):
             if float(msg.accel_x) <= self.BRAKING_ACCEL_THRESHOLD:
                 any_braking_peer_received = True
 
-        if any_braking_peer_received:
+        if update_braking_latch and any_braking_peer_received:
             self._braking_received_latched = True
 
         observation = self.obs_builder.build(

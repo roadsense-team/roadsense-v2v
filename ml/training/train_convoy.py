@@ -15,6 +15,7 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from ml.eval_dataset import (
     get_eval_capability_audit_path,
@@ -407,7 +408,14 @@ def train(args: argparse.Namespace) -> Tuple[str, Dict[str, int]]:
     else:
         env_kwargs["sumo_cfg"] = args.sumo_cfg
 
-    env = gym.make("RoadSense-Convoy-v0", **env_kwargs)
+    def _make_train_env():
+        return gym.make("RoadSense-Convoy-v0", **env_kwargs)
+
+    vec_env = DummyVecEnv([_make_train_env])
+    # Reward normalization stabilizes value function learning.
+    # norm_obs=False: observations are already manually normalized.
+    # norm_reward=True: normalizes rewards by running std of discounted returns.
+    vec_env = VecNormalize(vec_env, norm_obs=False, norm_reward=True)
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -422,7 +430,7 @@ def train(args: argparse.Namespace) -> Tuple[str, Dict[str, int]]:
 
     model = PPO(
         "MultiInputPolicy",
-        env,
+        vec_env,
         policy_kwargs=policy_kwargs,
         verbose=1,
         ent_coef=args.ent_coef,
@@ -441,7 +449,10 @@ def train(args: argparse.Namespace) -> Tuple[str, Dict[str, int]]:
             callback=checkpoint_callback,
         )
     finally:
-        env.close()
+        vec_normalize_path = os.path.join(args.output_dir, "vecnormalize.pkl")
+        vec_env.save(vec_normalize_path)
+        print(f"VecNormalize stats saved to: {vec_normalize_path}")
+        vec_env.close()
 
     model_path = os.path.join(args.output_dir, "model_final.zip")
     model.save(model_path)
