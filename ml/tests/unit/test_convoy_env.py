@@ -412,11 +412,14 @@ def test_hazard_source_braking_signal_latches_across_steps(
     _, _, _, _, info1 = env_with_mocks.step(np.array([0.0], dtype=np.float32))
     _, _, _, _, info2 = env_with_mocks.step(np.array([0.0], dtype=np.float32))
 
-    assert info1["hazard_source_braking_received"] is True
+    assert info1["braking_received_latched"] is True
+    assert info1["hazard_source_braking_latched"] is True
     assert info1["reward_ignoring_hazard"] == pytest.approx(-5.0)
 
     # Pre-fix bug: this became False as soon as slowDown() ended and accel_x=0.
-    assert info2["hazard_source_braking_received"] is True
+    # Both latches stay active across steps.
+    assert info2["braking_received_latched"] is True
+    assert info2["hazard_source_braking_latched"] is True
     assert info2["reward_ignoring_hazard"] == pytest.approx(-5.0)
 
 
@@ -453,7 +456,7 @@ def test_reset_observation_shape_is_dict(env_with_mocks):
     obs, _ = env_with_mocks.reset()
 
     assert set(obs.keys()) == {"ego", "peers", "peer_mask"}
-    assert obs["ego"].shape == (6,)
+    assert obs["ego"].shape == (7,)
     assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
     assert obs["peer_mask"].shape == (ObservationBuilder.MAX_PEERS,)
     assert obs["ego"].dtype == np.float32
@@ -724,7 +727,7 @@ def test_ego_exit_sets_truncated_true(env_with_mocks, mock_sumo):
     assert truncated is True
     assert terminated is False
     assert reward == 0.0
-    assert obs["ego"].shape == (6,)
+    assert obs["ego"].shape == (7,)
     assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
     assert info.get("truncated_reason") == "ego_route_ended"
 

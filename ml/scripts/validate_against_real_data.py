@@ -242,9 +242,10 @@ def run_replay(
     rx_window_start = 0
     braking_received_latched = False
 
-    print(f"Replaying {len(steps)} steps ({(t_end - t_start) / 1000:.1f}s) ...")
+    total_replay_steps = len(steps)
+    print(f"Replaying {total_replay_steps} steps ({(t_end - t_start) / 1000:.1f}s) ...")
 
-    for step_t in steps:
+    for step_idx, step_t in enumerate(steps):
         # Find ego state: use latest TX row <= step_t
         ego_row = tx_by_time.get(step_t)
         if ego_row is None:
@@ -279,12 +280,14 @@ def run_replay(
                 braking_received_latched = True
                 break
 
-        # Build observation
+        # Build observation (progress = step fraction of total replay)
+        replay_progress = step_idx / max(1, total_replay_steps)
         observation = obs_builder.build(
             ego_state=ego_state,
             peer_observations=peer_obs,
             ego_pos=ego_pos,
             braking_received=braking_received_latched,
+            progress=replay_progress,
         )
 
         # Model inference

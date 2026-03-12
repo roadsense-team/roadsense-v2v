@@ -223,9 +223,9 @@ def test_ignoring_hazard_penalty_persists_past_active_slowdown(make_env):
     penalty should persist for the rest of the hazard event, not only during
     the 2-4s active slowDown() window.
 
-    Directly tests the latch: after slowDown is guaranteed complete (hazard_step
-    + max_slowdown_steps), asserts penalty is still active on every non-terminal
-    step until the episode ends.
+    Run 017 update: the penalty is now suppressed when ego is stopped
+    (speed <= 0.5 m/s). So we allow gaps only when the speed gate is active
+    (info['ignoring_penalty_suppressed_for_stop'] is True).
     """
     from ml.envs.hazard_injector import HazardInjector
 
@@ -243,7 +243,7 @@ def test_ignoring_hazard_penalty_persists_past_active_slowdown(make_env):
 
     first_penalty_step = None
     post_slowdown_penalty = 0
-    post_slowdown_no_penalty = 0
+    post_slowdown_unexplained_gap = 0
 
     for step in range(260):
         obs, reward, terminated, truncated, step_info = env.step(
@@ -251,6 +251,9 @@ def test_ignoring_hazard_penalty_persists_past_active_slowdown(make_env):
         )
 
         has_penalty = step_info.get("reward_ignoring_hazard", 0.0) < 0.0
+        suppressed_for_stop = step_info.get(
+            "ignoring_penalty_suppressed_for_stop", False
+        )
 
         if has_penalty and first_penalty_step is None:
             first_penalty_step = step
@@ -259,8 +262,9 @@ def test_ignoring_hazard_penalty_persists_past_active_slowdown(make_env):
         if step > slowdown_done_step and not (terminated or truncated):
             if has_penalty:
                 post_slowdown_penalty += 1
-            else:
-                post_slowdown_no_penalty += 1
+            elif not suppressed_for_stop:
+                # Gap that is NOT explained by the stopped-car speed gate
+                post_slowdown_unexplained_gap += 1
 
         if terminated or truncated:
             break
@@ -272,9 +276,9 @@ def test_ignoring_hazard_penalty_persists_past_active_slowdown(make_env):
         f"No ignoring-hazard penalty detected after slowDown window "
         f"(step {slowdown_done_step}). The latch is not working."
     )
-    assert post_slowdown_no_penalty == 0, (
-        f"Ignoring-hazard penalty had {post_slowdown_no_penalty} gap(s) "
-        f"after slowDown completed (step {slowdown_done_step}). "
+    assert post_slowdown_unexplained_gap == 0, (
+        f"Ignoring-hazard penalty had {post_slowdown_unexplained_gap} "
+        f"unexplained gap(s) after slowDown completed (step {slowdown_done_step}). "
         f"The latch dropped before episode end."
     )
 
@@ -349,7 +353,7 @@ def test_emulator_resets_per_episode(make_env):
     # The key check: observation is valid and finite
     assert np.isfinite(obs["ego"]).all()
     assert np.isfinite(obs["peers"]).all()
-    assert obs["ego"].shape == (6,)
+    assert obs["ego"].shape == (7,)
 
 
 # --- Smoke training test ---
