@@ -58,3 +58,4 @@ deep_sets_*.zip
 timeseries_*.npz
 training-run*.log
 events.out.tfevents.*
+cloud_prod_014*
