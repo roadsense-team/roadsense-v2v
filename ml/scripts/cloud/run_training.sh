@@ -1,37 +1,38 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 016 - braking_received Observation Feature
+# RoadSense Training Run 017 - Diagnostic Critic Recovery
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
 # BEFORE LAUNCHING - customize these variables:
 #   RUN_ID        - Unique run identifier
 #   GITHUB_PAT    - Your GitHub Personal Access Token
-#   TOTAL_STEPS   - Training timesteps (default: 10000000)
+#   TOTAL_STEPS   - Training timesteps (default: 2000000 for diagnostic run)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 016 — Fix the dead critic that killed Runs 014 and 015:
+# Run 017 — Diagnostic fix package for the dead critic in Runs 014-016:
 #
-#   Root cause of Run 014/015 failure:
-#     Gradual slowDown produces min_peer_accel ~ -0.3 to -0.5 (normalized),
-#     overlapping with normal traffic. But PENALTY_IGNORING_HAZARD creates a
-#     ~2000 point return gap. The critic sees same-looking states with wildly
-#     different returns → explained_variance = 0 for the entire run.
+#   Merged diagnosis:
+#     1. Reward and observation were keyed off different latches.
+#     2. Hidden hazard timing remained partly unobservable to the critic.
+#     3. A stopped ego could still take the ignoring-hazard penalty.
 #
 #   Changes in this run:
-#     1. Added braking_received binary feature at ego[5] (6-dim ego, up from 5).
-#        1.0 when any peer's V2V-reported accel <= -2.5 m/s², 0.0 otherwise.
-#        Gives the critic a clean binary partition for hazard vs calm states.
-#     2. braking_received is LATCHED per episode — once set, stays 1.0 for the
-#        rest of the episode. Matches the reward's latched penalty condition.
-#        Eliminates state/reward aliasing where ego[5]=0 but penalty still fires.
-#     3. DeepSetExtractor features_dim updated: 37 → 38 (32 embed + 6 ego).
-#     4. H5 validation script fixed to compute and pass braking_received.
+#     1. Reward now keys off the same latched braking_received bit the policy
+#        sees in ego[5] (old hazard-source path kept only for instrumentation).
+#     2. Ego observation is now 7-dim: ego[6] = current_step / max_steps.
+#        DeepSetExtractor features_dim becomes 39 (32 embed + 7 ego).
+#     3. HazardInjector defaults are diagnostic:
+#        HAZARD_PROBABILITY=1.0 and DEFAULT_HAZARD_STEP=200.
+#     4. Stopped-car penalty bug fixed: ignoring-hazard penalty is suppressed
+#        when ego_speed <= 0.5 m/s.
+#     5. braking_received intentionally remains PRE-CONE for this diagnostic run
+#        to avoid adding another variable; reward is aligned to that same bit.
+#     6. New telemetry tracks obs/reward divergence and stop-suppression events.
 #
-#   Retained from Run 014/015:
-#     - Latch _hazard_source_braking_latched in convoy_env.py (~99% coverage)
+#   Retained from prior runs:
 #     - Gradual hazard injection (slowDown 2-4s, domain randomized)
-#     - CF override, Deep Sets, HAZARD_PROBABILITY=0.5
+#     - CF override, Deep Sets
 #     - base_real: sigma=0.0, speedFactor=1.0, speedDev=0, 25m spacing
 #     - Hazard-gated reward terms (PENALTY_IGNORING_HAZARD=-5.0,
 #       REWARD_EARLY_REACTION=+2.0, BRAKING_ACCEL_THRESHOLD=-2.5)
@@ -39,30 +40,29 @@
 #     - Dataset generation params (base_real, seed=42, 25 train + 40 eval)
 #
 #   Key diagnostic to watch:
-#     - explained_variance: MUST rise above 0 by 200k steps.
-#       If it stays at 0 with braking_received, there is a deeper issue.
-#     - V2V reaction at 1M checkpoint: first alive/dead signal.
+#     - explained_variance: >0.1 by 100k, >0.3 by 300k.
+#       If it stays near 0 / numerical noise, kill the run early.
+#     - V2V reaction at 1M checkpoint: target >=70% in deterministic eval.
 #
 #   Pass criteria:
-#     1. SUMO eval: >90% V2V reaction (target 100%, Run 011 baseline)
-#     2. avg_reward > -200 (Run 011 was -86.62)
-#     3. explained_variance > 0.5 by 5M steps
-#     4. H5 re-validation: model action > 0.1 within 3s of peer braking onset
-#     5. False positive rate < 5% in Extra Recording
+#     1. explained_variance wakes up clearly before 300k
+#     2. SUMO eval at 1M: >=70% V2V reaction
+#     3. No regression in collision rate
+#     4. If alive at 1M, continue to 2M and decide whether to extend later
 # =============================================================================
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_016"
+RUN_ID="cloud_prod_017"
 GITHUB_PAT="<YOUR_PAT_HERE>"
-TOTAL_STEPS=10000000
+TOTAL_STEPS=2000000
 S3_BUCKET="saferide-training-results"
 # ===========================================================
 
 export AWS_DEFAULT_REGION=il-central-1
 export AWS_REGION="$AWS_DEFAULT_REGION"
 WORK_DIR="/home/ubuntu/work"
-DATASET_DIR="ml/scenarios/datasets/dataset_v8"
+DATASET_DIR="ml/scenarios/datasets/dataset_v9"
 EMULATOR_PARAMS="ml/espnow_emulator/emulator_params_measured.json"
 
 # -------------------------------------------------------------------
@@ -117,8 +117,8 @@ echo "[2/7] Rebuilding Docker image (cached - should be fast)..."
 cd "$WORK_DIR/ml"
 docker build -t roadsense-ml:latest .
 
-# 3. Generate dataset_v8 from base_real (same params as v6/v7)
-echo "[3/7] Generating dataset_v8 from base_real..."
+# 3. Generate dataset_v9 from base_real (same canonical params)
+echo "[3/7] Generating dataset_v9 from base_real..."
 cd "$WORK_DIR"
 ./ml/run_docker.sh generate \
     --base_dir ml/scenarios/base_real \
@@ -163,6 +163,8 @@ set +e
     --total_timesteps "$TOTAL_STEPS" \
     --run_id "$RUN_ID" \
     --output_dir /work/results \
+    --eval_force_hazard \
+    --eval_hazard_step 200 \
     --eval_use_deterministic_matrix \
     --eval_matrix_peer_counts "1,2,3,4,5" \
     --eval_matrix_episodes_per_bucket 10
