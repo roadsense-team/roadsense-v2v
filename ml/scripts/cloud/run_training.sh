@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 015 - Critic Fix (HAZARD_PROBABILITY 1.0 → 0.5)
+# RoadSense Training Run 016 - braking_received Observation Feature
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,23 +10,28 @@
 #   TOTAL_STEPS   - Training timesteps (default: 10000000)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 015 — Fix critic starvation from Run 014:
+# Run 016 — Fix the dead critic that killed Runs 014 and 015:
 #
-#   Root cause of Run 014 failure:
-#     HAZARD_PROBABILITY=1.0 meant every episode had a massive hazard penalty.
-#     The critic saw uniformly bad returns with no contrastive "calm" episodes,
-#     so explained_variance stayed at 0 for the entire run (~1M steps).
-#     Without a working critic, PPO advantage estimates were noise and the
-#     actor could not learn V2V reaction (0% at 1M checkpoint).
+#   Root cause of Run 014/015 failure:
+#     Gradual slowDown produces min_peer_accel ~ -0.3 to -0.5 (normalized),
+#     overlapping with normal traffic. But PENALTY_IGNORING_HAZARD creates a
+#     ~2000 point return gap. The critic sees same-looking states with wildly
+#     different returns → explained_variance = 0 for the entire run.
 #
-#   Single change in this run:
-#     1. HAZARD_PROBABILITY reverted to 0.5 (matching Run 011's proven setup).
-#        Gives the critic ~50% calm episodes to anchor value estimates.
+#   Changes in this run:
+#     1. Added braking_received binary feature at ego[5] (6-dim ego, up from 5).
+#        1.0 when any peer's V2V-reported accel <= -2.5 m/s², 0.0 otherwise.
+#        Gives the critic a clean binary partition for hazard vs calm states.
+#     2. braking_received is LATCHED per episode — once set, stays 1.0 for the
+#        rest of the episode. Matches the reward's latched penalty condition.
+#        Eliminates state/reward aliasing where ego[5]=0 but penalty still fires.
+#     3. DeepSetExtractor features_dim updated: 37 → 38 (32 embed + 6 ego).
+#     4. H5 validation script fixed to compute and pass braking_received.
 #
-#   Retained from Run 014:
+#   Retained from Run 014/015:
 #     - Latch _hazard_source_braking_latched in convoy_env.py (~99% coverage)
 #     - Gradual hazard injection (slowDown 2-4s, domain randomized)
-#     - CF override, Deep Sets, observation (5-dim ego)
+#     - CF override, Deep Sets, HAZARD_PROBABILITY=0.5
 #     - base_real: sigma=0.0, speedFactor=1.0, speedDev=0, 25m spacing
 #     - Hazard-gated reward terms (PENALTY_IGNORING_HAZARD=-5.0,
 #       REWARD_EARLY_REACTION=+2.0, BRAKING_ACCEL_THRESHOLD=-2.5)
@@ -34,8 +39,8 @@
 #     - Dataset generation params (base_real, seed=42, 25 train + 40 eval)
 #
 #   Key diagnostic to watch:
-#     - explained_variance: MUST rise above 0 by 500k steps.
-#       If it stays at 0, the critic is still broken and something else is wrong.
+#     - explained_variance: MUST rise above 0 by 200k steps.
+#       If it stays at 0 with braking_received, there is a deeper issue.
 #     - V2V reaction at 1M checkpoint: first alive/dead signal.
 #
 #   Pass criteria:
@@ -48,7 +53,7 @@
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_015"
+RUN_ID="cloud_prod_016"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=10000000
 S3_BUCKET="saferide-training-results"

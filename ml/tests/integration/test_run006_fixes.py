@@ -164,6 +164,10 @@ def test_braking_peer_in_observation(make_env):
             # After hazard injection, check for braking signal
             if step > 162 and obs["ego"][4] < -0.03:
                 found_braking_signal = True
+                # Binary braking_received flag (ego[5]) must also be set
+                assert obs["ego"][5] == pytest.approx(1.0), (
+                    f"braking_received flag not set when min_peer_accel={obs['ego'][4]}"
+                )
                 break
 
             if terminated or truncated:
@@ -345,7 +349,7 @@ def test_emulator_resets_per_episode(make_env):
     # The key check: observation is valid and finite
     assert np.isfinite(obs["ego"]).all()
     assert np.isfinite(obs["peers"]).all()
-    assert obs["ego"].shape == (5,)
+    assert obs["ego"].shape == (6,)
 
 
 # --- Smoke training test ---

@@ -44,7 +44,8 @@ from ml.envs.sumo_connection import VehicleState
 METERS_PER_DEG_LAT = 111_000.0  # Same as ESPNOWEmulator.METERS_PER_DEG_LAT
 STEP_MS = 100  # 10 Hz replay rate (matches sensor broadcast rate)
 STALENESS_THRESHOLD_MS = 500.0
-BRAKING_THRESHOLD_MS2 = -1.0  # accel below this = braking event
+BRAKING_THRESHOLD_MS2 = -1.0  # accel below this = braking event (analysis)
+V2V_BRAKING_ACCEL_THRESHOLD = -2.5  # matches ConvoyEnv.BRAKING_ACCEL_THRESHOLD
 MODEL_ACTION_THRESHOLD = 0.1  # model action above this = model brakes
 MAX_DECEL = 8.0  # m/s², matches training
 
@@ -239,6 +240,7 @@ def run_replay(
 
     last_ego: Optional[SensorRow] = None
     rx_window_start = 0
+    braking_received_latched = False
 
     print(f"Replaying {len(steps)} steps ({(t_end - t_start) / 1000:.1f}s) ...")
 
@@ -271,11 +273,18 @@ def run_replay(
 
         peer_obs = build_peer_observations(rx_window, step_t)
 
+        # Compute braking_received with latch (matches training env behavior)
+        for p in peer_obs:
+            if p.get("accel", 0.0) <= V2V_BRAKING_ACCEL_THRESHOLD:
+                braking_received_latched = True
+                break
+
         # Build observation
         observation = obs_builder.build(
             ego_state=ego_state,
             peer_observations=peer_obs,
             ego_pos=ego_pos,
+            braking_received=braking_received_latched,
         )
 
         # Model inference
@@ -286,6 +295,7 @@ def run_replay(
         # Count visible peers from observation
         visible_peers = int(np.sum(observation["peer_mask"]))
         min_pa = float(observation["ego"][4]) * obs_builder.MAX_ACCEL
+        braking_received = float(observation["ego"][5]) > 0.5
 
         results["timestamps_ms"].append(step_t)
         results["ego_speed"].append(float(ego_row.speed))
