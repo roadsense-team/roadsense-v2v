@@ -19,8 +19,11 @@ class HazardInjector:
     DEFAULT_HAZARD_STEP = 200
 
     STEP_LENGTH = 0.1  # seconds per simulation step
-    BRAKING_DURATION_MIN = 2.0  # seconds
-    BRAKING_DURATION_MAX = 4.0  # seconds
+    # Run 018: shorter braking produces accel signal ~-10 m/s² (clamped),
+    # clearly distinguishable from normal CF adjustments (-0.3 to -0.5).
+    # At 13.9 m/s: 0.5s → -27.8 (clamped to -10), 1.5s → -9.3 m/s².
+    BRAKING_DURATION_MIN = 0.5  # seconds
+    BRAKING_DURATION_MAX = 1.5  # seconds
 
     EMERGENCY_BRAKE = "emergency_brake"
     EGO_VEHICLE_ID = "V001"

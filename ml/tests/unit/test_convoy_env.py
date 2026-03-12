@@ -443,6 +443,39 @@ def test_reset_clears_braking_received_latch(env_with_mocks):
     assert env_with_mocks._braking_received_latched is False
 
 
+def test_reset_does_not_carry_warmup_braking_into_episode(
+    env_with_mocks,
+    mock_sumo,
+    mock_emulator,
+):
+    """Warmup braking must not pre-latch ego[5] before the episode starts."""
+    states = {
+        "V001": _make_state("V001", x=0.0, y=0.0, speed=12.0),
+        "V002": _make_state("V002", x=0.0, y=20.0, speed=10.0),
+        "V003": _make_state("V003", x=0.0, y=40.0, speed=10.0),
+    }
+    _set_states(mock_sumo, states)
+    mock_sumo.get_active_vehicle_ids.return_value = ["V001", "V002", "V003"]
+
+    warmup_brake = {
+        "V002": _make_received_message(
+            "V002",
+            x=0.0,
+            y=20.0,
+            age_ms=10,
+            hop_count=0,
+            speed=8.0,
+            accel_x=-4.0,
+        ),
+    }
+    mock_emulator.simulate_mesh_step.side_effect = ([warmup_brake] * 30) + [{}]
+
+    obs, _ = env_with_mocks.reset()
+
+    assert env_with_mocks._braking_received_latched is False
+    assert obs["ego"][5] == pytest.approx(0.0)
+
+
 def test_step_accepts_float_action(env_with_mocks):
     """step() accepts scalar float action."""
     env_with_mocks.reset()
