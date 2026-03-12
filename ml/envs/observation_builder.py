@@ -15,7 +15,7 @@ class ObservationBuilder:
     Builds observation dict for variable-n peer environments.
 
     Keys:
-        - ego: [speed/30, accel/10, heading/pi, peer_count/8, min_peer_accel/10, braking_received]
+        - ego: [speed/30, accel/10, heading/pi, peer_count/8, min_peer_accel/10, braking_received, progress]
         - peers: (MAX_PEERS, 6) peer features
         - peer_mask: (MAX_PEERS,) 1.0 for valid peers, 0.0 for padding
     """
@@ -60,9 +60,13 @@ class ObservationBuilder:
         peer_observations: List[Dict[str, float]],
         ego_pos: Tuple[float, float],
         braking_received: bool = False,
+        progress: float = 0.0,
     ) -> Dict[str, np.ndarray]:
         """
         Build observation dict from ego state and variable peer list.
+
+        Args:
+            progress: current_step / max_steps, normalized episode progress [0, 1].
 
         Returns:
             Dict with 'ego', 'peers', and 'peer_mask' arrays
@@ -124,6 +128,7 @@ class ObservationBuilder:
                 valid_count / self.MAX_PEERS,
                 min_peer_accel / self.MAX_ACCEL,
                 1.0 if braking_received else 0.0,
+                max(0.0, min(1.0, float(progress))),
             ],
             dtype=np.float32,
         )

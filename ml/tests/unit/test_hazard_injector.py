@@ -40,16 +40,24 @@ def mock_sumo():
 
 
 def test_hazard_injector_respects_probability():
-    """~50% of episodes get a hazard (statistical test)."""
+    """Run 017: HAZARD_PROBABILITY=1.0 — all episodes get a hazard."""
     hazard_count = 0
 
-    for i in range(1000):
+    for i in range(100):
         inj = HazardInjector(seed=i)
         inj.reset()
         if inj._episode_will_have_hazard:
             hazard_count += 1
 
-    assert 400 <= hazard_count <= 600, f"Got {hazard_count}, expected ~500"
+    assert hazard_count == 100, f"Got {hazard_count}, expected 100"
+
+
+def test_hazard_injector_default_step_is_fixed():
+    """Run 017: default hazard_step is fixed at 200 (not randomized)."""
+    for seed in range(50):
+        inj = HazardInjector(seed=seed)
+        inj.reset()
+        assert inj.hazard_step == 200, f"Seed {seed}: got {inj.hazard_step}, expected 200"
 
 
 def test_hazard_injector_only_injects_in_window(mock_sumo):

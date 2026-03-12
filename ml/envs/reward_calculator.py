@@ -1,13 +1,13 @@
 """
 Reward calculation utilities for ConvoyEnv.
 
-Run 013 — Linear Ramp + Hazard-Gated V2V Response Terms.
-Builds on Run 009 ramp structure. Adds two hazard-conditioned terms:
-  - PENALTY_IGNORING_HAZARD: fires when the injected hazard source is braking
-    AND ego has received that message AND ego is not braking.  Training-only
-    (gated to injected hazard source, never fires during normal driving).
-  - REWARD_EARLY_REACTION: bonus when ego brakes while hazard source is braking
-    AND distance is still > EARLY_REACTION_DIST.  Teaches V2V signal usage.
+Run 017 — Linear Ramp + Aligned V2V Response Terms + Speed-Gated Penalty.
+Builds on Run 009 ramp structure.  Run 017 changes:
+  - Reward gate uses the SAME braking_received latch that drives ego[5]
+    (was hazard-source-only in Runs 013-016, causing obs/reward desync).
+  - PENALTY_IGNORING_HAZARD suppressed when ego is stopped (speed <= 0.5 m/s).
+  - REWARD_EARLY_REACTION: bonus when ego brakes while braking signal is active
+    AND distance is still > EARLY_REACTION_DIST.
 """
 
 from typing import Dict, Tuple
@@ -56,6 +56,7 @@ class RewardCalculator:
     PENALTY_IGNORING_HAZARD = -5.0
     REWARD_EARLY_REACTION = 2.0
     EARLY_REACTION_DIST = 15.0
+    STOPPED_SPEED_THRESHOLD = 0.5
 
     def _safety_reward(self, distance: float) -> float:
         """Calculate safety reward with continuous linear ramp."""
@@ -131,15 +132,16 @@ class RewardCalculator:
         deceleration: float,
         closing_rate: float = 0.0,
         any_braking_peer: bool = False,
-        hazard_source_braking_received: bool = False,
+        braking_received: bool = False,
+        ego_speed: float = 10.0,
     ) -> Tuple[float, Dict]:
         """Calculate total reward for current step.
 
-        hazard_source_braking_received: True when the *injected* hazard source
-        is actively braking AND ego has received that source's V2V message this
-        step.  Gated to the specific hazard target — never True during normal
-        driving.  Used to compute ignoring-hazard penalty and early-reaction
-        bonus.
+        braking_received: aligned latched signal — same bit that drives ego[5].
+            True once any valid peer hard-brake message has been received this
+            episode.  Used for ignoring-hazard penalty and early-reaction bonus.
+        ego_speed: current ego speed in m/s.  Used to suppress the ignoring
+            penalty when ego is already stopped.
         """
         safety = self._safety_reward(distance)
         base_comfort = self._comfort_penalty(deceleration)
@@ -151,13 +153,18 @@ class RewardCalculator:
 
         early_reaction = 0.0
         ignoring_hazard = 0.0
+        ignoring_penalty_suppressed_for_stop = False
 
-        if hazard_source_braking_received:
+        if braking_received:
             decel_abs = abs(deceleration)
             is_braking = decel_abs > self.GENTLE_DECEL_THRESHOLD
+            is_stopped = ego_speed <= self.STOPPED_SPEED_THRESHOLD
 
             if not is_braking:
-                ignoring_hazard = self.PENALTY_IGNORING_HAZARD
+                if is_stopped:
+                    ignoring_penalty_suppressed_for_stop = True
+                else:
+                    ignoring_hazard = self.PENALTY_IGNORING_HAZARD
             elif distance > self.EARLY_REACTION_DIST:
                 early_reaction = self.REWARD_EARLY_REACTION
 
@@ -178,7 +185,9 @@ class RewardCalculator:
             "deceleration": deceleration,
             "closing_rate": closing_rate,
             "any_braking_peer": any_braking_peer,
-            "hazard_source_braking_received": hazard_source_braking_received,
+            "braking_received": braking_received,
+            "ego_speed": ego_speed,
+            "ignoring_penalty_suppressed_for_stop": ignoring_penalty_suppressed_for_stop,
         }
 
         return total, info

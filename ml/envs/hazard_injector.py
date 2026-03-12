@@ -12,9 +12,11 @@ class HazardInjector:
     selection strategies.
     """
 
-    HAZARD_PROBABILITY = 0.5
+    # Run 017 diagnostic: deterministic hazard every episode at fixed step.
+    HAZARD_PROBABILITY = 1.0
     HAZARD_WINDOW_START = 150
     HAZARD_WINDOW_END = 350
+    DEFAULT_HAZARD_STEP = 200
 
     STEP_LENGTH = 0.1  # seconds per simulation step
     BRAKING_DURATION_MIN = 2.0  # seconds
@@ -102,10 +104,7 @@ class HazardInjector:
                 )
             self._hazard_step = hazard_step
         else:
-            self._hazard_step = self._rng.randint(
-                self.HAZARD_WINDOW_START,
-                self.HAZARD_WINDOW_END,
-            )
+            self._hazard_step = self.DEFAULT_HAZARD_STEP
 
         self._hazard_injected = False
         self._hazard_target = None

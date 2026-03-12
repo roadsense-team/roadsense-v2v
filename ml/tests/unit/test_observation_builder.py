@@ -50,7 +50,7 @@ def test_build_observation_returns_dict_shapes():
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
     assert isinstance(result, dict)
-    assert result["ego"].shape == (6,)
+    assert result["ego"].shape == (7,)
     assert result["peers"].shape == (builder.MAX_PEERS, 6)
     assert result["peer_mask"].shape == (builder.MAX_PEERS,)
 
@@ -177,3 +177,30 @@ def test_build_observation_all_stale_peers_excluded():
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
     assert result["peer_mask"].sum() == pytest.approx(0.0)
+
+
+def test_build_observation_progress_feature():
+    """ego[6] reflects the normalized episode progress."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state()
+
+    result_mid = builder.build(ego_state, [], (ego_state.x, ego_state.y), progress=0.5)
+    assert result_mid["ego"][6] == pytest.approx(0.5)
+
+    result_start = builder.build(ego_state, [], (ego_state.x, ego_state.y), progress=0.0)
+    assert result_start["ego"][6] == pytest.approx(0.0)
+
+    result_end = builder.build(ego_state, [], (ego_state.x, ego_state.y), progress=1.0)
+    assert result_end["ego"][6] == pytest.approx(1.0)
+
+
+def test_build_observation_progress_clamped():
+    """Progress is clamped to [0, 1]."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state()
+
+    result = builder.build(ego_state, [], (ego_state.x, ego_state.y), progress=1.5)
+    assert result["ego"][6] == pytest.approx(1.0)
+
+    result_neg = builder.build(ego_state, [], (ego_state.x, ego_state.y), progress=-0.1)
+    assert result_neg["ego"][6] == pytest.approx(0.0)
