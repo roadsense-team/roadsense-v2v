@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 014 - Latch Fix + Formation-Fixed base_real
+# RoadSense Training Run 015 - Critic Fix (HAZARD_PROBABILITY 1.0 → 0.5)
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,43 +10,45 @@
 #   TOTAL_STEPS   - Training timesteps (default: 10000000)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 014 — Latch fix (Run 013 root cause) + formation-fixed base_real:
+# Run 015 — Fix critic starvation from Run 014:
 #
-#   Root cause of Run 013 failure:
-#     PENALTY_IGNORING_HAZARD only fired during the 2-4s slowDown window.
-#     After slowDown completed, the hazard source was stopped but the penalty
-#     signal disappeared — covering only 8-16% of post-hazard steps.
-#     The model learned to wait out the short penalty window.
+#   Root cause of Run 014 failure:
+#     HAZARD_PROBABILITY=1.0 meant every episode had a massive hazard penalty.
+#     The critic saw uniformly bad returns with no contrastive "calm" episodes,
+#     so explained_variance stayed at 0 for the entire run (~1M steps).
+#     Without a working critic, PPO advantage estimates were noise and the
+#     actor could not learn V2V reaction (0% at 1M checkpoint).
 #
-#   Changes in this run (see RUN_014_PREP_CHECKLIST.md):
-#     1. Latch _hazard_source_braking_latched in convoy_env.py — reward signal
-#        persists for the entire hazard event, not just the 2-4s slowDown.
-#        Covers ~99% of post-hazard steps instead of 8-16%.
-#     2. base_real: sigma=0.0, speedFactor=1.0, speedDev=0 — no random
-#        braking/accel perturbations, formation holds during training.
-#     3. base_real: 25m departPos spacing — above SUMO safe-insertion
-#        threshold (9.6m), prevents staggered insertion delays.
-#     4. Integration tests on base_real — Docker tests validate actual
-#        training scenario (conftest.py, test_run006_fixes.py).
+#   Single change in this run:
+#     1. HAZARD_PROBABILITY reverted to 0.5 (matching Run 011's proven setup).
+#        Gives the critic ~50% calm episodes to anchor value estimates.
 #
-#   Unchanged from Run 013:
+#   Retained from Run 014:
+#     - Latch _hazard_source_braking_latched in convoy_env.py (~99% coverage)
 #     - Gradual hazard injection (slowDown 2-4s, domain randomized)
 #     - CF override, Deep Sets, observation (5-dim ego)
+#     - base_real: sigma=0.0, speedFactor=1.0, speedDev=0, 25m spacing
 #     - Hazard-gated reward terms (PENALTY_IGNORING_HAZARD=-5.0,
 #       REWARD_EARLY_REACTION=+2.0, BRAKING_ACCEL_THRESHOLD=-2.5)
 #     - Hyperparams: LR=1e-4, n_steps=4096, ent_coef=0.0, log_std_init=-0.5
 #     - Dataset generation params (base_real, seed=42, 25 train + 40 eval)
 #
+#   Key diagnostic to watch:
+#     - explained_variance: MUST rise above 0 by 500k steps.
+#       If it stays at 0, the critic is still broken and something else is wrong.
+#     - V2V reaction at 1M checkpoint: first alive/dead signal.
+#
 #   Pass criteria:
 #     1. SUMO eval: >90% V2V reaction (target 100%, Run 011 baseline)
 #     2. avg_reward > -200 (Run 011 was -86.62)
-#     3. H5 re-validation: model action > 0.1 within 3s of peer braking onset
-#     4. False positive rate < 5% in Extra Recording
+#     3. explained_variance > 0.5 by 5M steps
+#     4. H5 re-validation: model action > 0.1 within 3s of peer braking onset
+#     5. False positive rate < 5% in Extra Recording
 # =============================================================================
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_014"
+RUN_ID="cloud_prod_015"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=10000000
 S3_BUCKET="saferide-training-results"
