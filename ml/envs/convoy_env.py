@@ -104,11 +104,12 @@ class ConvoyEnv(gym.Env):
         self._hazard_injection_step: Optional[int] = None
         self._cf_override_active = False
         self._hazard_source_braking_latched = False
+        self._braking_received_latched = False
 
         self.observation_space = spaces.Dict({
             "ego": spaces.Box(
-                low=np.array([0.0, -1.0, -1.0, 0.0, -1.0], dtype=np.float32),
-                high=np.array([1.0, 1.0, 1.0, 1.0, 0.0], dtype=np.float32),
+                low=np.array([0.0, -1.0, -1.0, 0.0, -1.0, 0.0], dtype=np.float32),
+                high=np.array([1.0, 1.0, 1.0, 1.0, 0.0, 1.0], dtype=np.float32),
                 dtype=np.float32,
             ),
             "peers": spaces.Box(
@@ -184,6 +185,7 @@ class ConvoyEnv(gym.Env):
         self._hazard_injection_step = None
         self._cf_override_active = False
         self._hazard_source_braking_latched = False
+        self._braking_received_latched = False
 
         scenario_id = None
         if self.scenario_manager is not None:
@@ -277,7 +279,7 @@ class ConvoyEnv(gym.Env):
         # Must check BEFORE any TraCI calls (apply/inject) to avoid crash.
         if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
             empty_obs = {
-                "ego": np.zeros(5, dtype=np.float32),
+                "ego": np.zeros(6, dtype=np.float32),
                 "peers": np.zeros((self.MAX_PEERS, 6), dtype=np.float32),
                 "peer_mask": np.zeros(self.MAX_PEERS, dtype=np.float32),
             }
@@ -322,7 +324,7 @@ class ConvoyEnv(gym.Env):
         # Post-step guard: V001 may have left during this sumo.step().
         if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
             empty_obs = {
-                "ego": np.zeros(5, dtype=np.float32),
+                "ego": np.zeros(6, dtype=np.float32),
                 "peers": np.zeros((self.MAX_PEERS, 6), dtype=np.float32),
                 "peer_mask": np.zeros(self.MAX_PEERS, dtype=np.float32),
             }
@@ -421,6 +423,7 @@ class ConvoyEnv(gym.Env):
             "hazard_injection_failed_reason": hazard_injection_failed_reason,
             "mesh_received_source_ids": mesh_received_source_ids,
             "mesh_any_braking_peer_received": any_braking_peer_received,
+            "braking_received_latched": self._braking_received_latched,
             **reward_info,
         }
 
@@ -492,10 +495,14 @@ class ConvoyEnv(gym.Env):
             if float(msg.accel_x) <= self.BRAKING_ACCEL_THRESHOLD:
                 any_braking_peer_received = True
 
+        if any_braking_peer_received:
+            self._braking_received_latched = True
+
         observation = self.obs_builder.build(
             ego_state=ego_state,
             peer_observations=peer_observations,
             ego_pos=ego_pos,
+            braking_received=self._braking_received_latched,
         )
 
         return (

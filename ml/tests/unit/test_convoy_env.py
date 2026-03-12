@@ -430,6 +430,16 @@ def test_reset_clears_hazard_source_braking_latch(env_with_mocks):
     assert env_with_mocks._hazard_source_braking_latched is False
 
 
+def test_reset_clears_braking_received_latch(env_with_mocks):
+    """Episode reset must clear the observation braking_received latch."""
+    env_with_mocks.reset()
+    env_with_mocks._braking_received_latched = True
+
+    env_with_mocks.reset()
+
+    assert env_with_mocks._braking_received_latched is False
+
+
 def test_step_accepts_float_action(env_with_mocks):
     """step() accepts scalar float action."""
     env_with_mocks.reset()
@@ -443,7 +453,7 @@ def test_reset_observation_shape_is_dict(env_with_mocks):
     obs, _ = env_with_mocks.reset()
 
     assert set(obs.keys()) == {"ego", "peers", "peer_mask"}
-    assert obs["ego"].shape == (5,)
+    assert obs["ego"].shape == (6,)
     assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
     assert obs["peer_mask"].shape == (ObservationBuilder.MAX_PEERS,)
     assert obs["ego"].dtype == np.float32
@@ -714,7 +724,7 @@ def test_ego_exit_sets_truncated_true(env_with_mocks, mock_sumo):
     assert truncated is True
     assert terminated is False
     assert reward == 0.0
-    assert obs["ego"].shape == (5,)
+    assert obs["ego"].shape == (6,)
     assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
     assert info.get("truncated_reason") == "ego_route_ended"
 

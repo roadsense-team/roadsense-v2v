@@ -50,7 +50,7 @@ def test_build_observation_returns_dict_shapes():
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
     assert isinstance(result, dict)
-    assert result["ego"].shape == (5,)
+    assert result["ego"].shape == (6,)
     assert result["peers"].shape == (builder.MAX_PEERS, 6)
     assert result["peer_mask"].shape == (builder.MAX_PEERS,)
 
