@@ -1,76 +1,59 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 018 - Signal Strength + Reward Normalization
+# RoadSense Training Run 019 - Full Production Run (10M steps)
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
 # BEFORE LAUNCHING - customize these variables:
 #   RUN_ID        - Unique run identifier
 #   GITHUB_PAT    - Your GitHub Personal Access Token
-#   TOTAL_STEPS   - Training timesteps (default: 2000000 for diagnostic run)
+#   TOTAL_STEPS   - Training timesteps (default: 10000000 for production run)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 018 — Fix the dead critic (explained_variance=0 in Runs 014-017):
+# Run 019 — Production run. Run 018 (2M diagnostic) validated the fix:
 #
-#   Root cause (confirmed by 5 consecutive failed runs):
-#     Gradual slowDown (2-4s) produces peer accel of ~-4.6 m/s^2 (normalized
-#     -0.46), which OVERLAPS with normal car-following adjustments (-0.3 to
-#     -0.5). The critic cannot distinguish hazard from normal driving in the
-#     observation space. explained_variance=0 is the mathematically correct
-#     answer: identical-looking states genuinely map to different returns.
+#   Run 018 results (2M steps):
+#     - V2V reaction: 100% (276/276) across all ranks and peer counts
+#     - Avg reward: +691.72 (vs Run 011's -86.62)
+#     - Collision rate: 0%, Behavioral success: 98.2%
+#     - Explained variance: 0.71-0.93 (critic alive from step ~28k)
+#     - Std: 0.603 -> 0.091 (still converging — room for 10M improvement)
+#     - Reaction times: 0.21-1.49s (10x faster than Run 011's 2.88-11.02s)
+#     - 15/15 eval matrix buckets covered
 #
-#     Run 011 (last success, explained_variance=0.956) used setSpeed(0) which
-#     produced an instant -10.0 m/s^2 signal — unmistakable in the observation.
+#   Changes from Run 018:
+#     1. TOTAL_STEPS: 2M -> 10M (production run, not diagnostic)
+#     2. Monitor wrapper added to training env (enables rollout/ep_rew_mean
+#        and rollout/ep_len_mean logging that was missing in Run 018)
 #
-#   Changes in this run (2 fixes):
-#     1. FASTER SLOWDOWN: BRAKING_DURATION 2-4s -> 0.5-1.5s.
-#        At 13.9 m/s convoy speed: produces -9.3 to -27.8 m/s^2 (clamped to
-#        -10.0 by VehicleState), matching Run 011's signal strength.
-#        Still gradual (slowDown, not setSpeed) for sim-to-real validity.
-#        Real emergency braking at -8.6 m/s^2 takes ~1.6s from 50 km/h.
-#     2. REWARD NORMALIZATION: VecNormalize(norm_obs=False, norm_reward=True).
-#        Raw returns span -2500 to +2000 with no normalization.
-#        Value function now learns from unit-scale targets.
-#
-#   Also includes (from Codex):
-#     3. Warmup contamination fix: braking_received latch cannot be set during
-#        pre-episode warmup (update_braking_latch=False + explicit reset).
-#
-#   Retained from Run 017 (all 5 structural fixes still active):
-#     - Reward aligned to observation braking_received latch (Fix 1)
-#     - Progress feature ego[6] = step/max_steps, 7-dim ego (Fix 2)
-#     - Fixed hazard timing: HAZARD_PROBABILITY=1.0, step=200 (Fix 3)
-#     - Speed-gated penalty: suppressed when ego_speed <= 0.5 m/s (Fix 4)
-#     - Instrumentation: obs/reward divergence, stop-suppression (Fix 5)
-#     - braking_received remains PRE-CONE
+#   All Run 018 fixes still active:
+#     - Faster slowDown: BRAKING_DURATION 0.5-1.5s (signal strength fix)
+#     - VecNormalize(norm_obs=False, norm_reward=True) (reward normalization)
+#     - Warmup contamination fix (Codex)
+#     - All 5 Run 017 structural fixes (reward alignment, progress feature,
+#       fixed hazard timing, speed-gated penalty, instrumentation)
 #     - CF override, Deep Sets, features_dim=39
-#     - base_real: sigma=0.0, speedFactor=1.0, speedDev=0, 25m spacing
-#     - Hazard-gated reward terms (PENALTY_IGNORING_HAZARD=-5.0,
-#       REWARD_EARLY_REACTION=+2.0, BRAKING_ACCEL_THRESHOLD=-2.5)
 #     - Hyperparams: LR=1e-4, n_steps=4096, ent_coef=0.0, log_std_init=-0.5
-#     - Dataset generation params (base_real, seed=42, 25 train + 40 eval)
+#     - Dataset: base_real, seed=42, 25 train + 40 eval
 #
-#   Key diagnostic to watch:
-#     - explained_variance: >0.1 by 100k, >0.3 by 300k.
-#       If it stays near 0 / numerical noise, kill the run early.
-#     - V2V reaction at 1M checkpoint: target >=70% in deterministic eval.
+#   Expected behavior (based on Run 018 trajectory):
+#     - explained_variance > 0.7 by 100k
+#     - std converges below 0.05 (Run 011 reached 0.043 at 10M)
+#     - V2V reaction stays 100%
+#     - ep_rew_mean should be visible in logs (Monitor fix)
 #
-#   Pass criteria:
-#     1. explained_variance wakes up clearly before 300k
-#     2. SUMO eval at 1M: >=70% V2V reaction
-#     3. No regression in collision rate
-#     4. If alive at 1M, continue to 2M and decide whether to extend later
-#
-#   Kill criteria (same as Run 017):
-#     - explained_variance=0 at 300k
-#     - V2V reaction=0% at first checkpoint
+#   This run should produce the final model for:
+#     - H5 sim-to-real validation
+#     - TFLite INT8 quantization
+#     - ESP32 deployment
+#     - Professor PoC demo
 # =============================================================================
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_018"
+RUN_ID="cloud_prod_019"
 GITHUB_PAT="<YOUR_PAT_HERE>"
-TOTAL_STEPS=2000000
+TOTAL_STEPS=10000000
 S3_BUCKET="saferide-training-results"
 # ===========================================================
 
