@@ -15,6 +15,7 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from ml.eval_dataset import (
@@ -409,7 +410,8 @@ def train(args: argparse.Namespace) -> Tuple[str, Dict[str, int]]:
         env_kwargs["sumo_cfg"] = args.sumo_cfg
 
     def _make_train_env():
-        return gym.make("RoadSense-Convoy-v0", **env_kwargs)
+        env = gym.make("RoadSense-Convoy-v0", **env_kwargs)
+        return Monitor(env)
 
     vec_env = DummyVecEnv([_make_train_env])
     # Reward normalization stabilizes value function learning.
