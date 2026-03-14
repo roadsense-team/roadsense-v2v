@@ -50,7 +50,7 @@ def test_build_observation_returns_dict_shapes():
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
     assert isinstance(result, dict)
-    assert result["ego"].shape == (7,)
+    assert result["ego"].shape == (6,)
     assert result["peers"].shape == (builder.MAX_PEERS, 6)
     assert result["peer_mask"].shape == (builder.MAX_PEERS,)
 
@@ -135,6 +135,37 @@ def test_build_observation_peers_behind_ego_filtered_by_cone():
     assert result["peer_mask"].sum() == pytest.approx(0.0)
 
 
+def test_filter_observable_peers_keeps_front_peer():
+    """Shared helper keeps peers in front of ego."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state(heading=0.0)
+    peers = [_make_peer_obs(0.0, 25.0, accel=-4.0, valid=True)]
+
+    filtered = builder.filter_observable_peers(
+        ego_heading_deg=ego_state.heading,
+        ego_pos=(ego_state.x, ego_state.y),
+        peer_observations=peers,
+    )
+
+    assert len(filtered) == 1
+    assert filtered[0]["accel"] == pytest.approx(-4.0)
+
+
+def test_filter_observable_peers_excludes_behind_peer():
+    """Shared helper excludes behind peers from post-cone braking logic."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state(heading=0.0)
+    peers = [_make_peer_obs(0.0, -25.0, accel=-8.0, valid=True)]
+
+    filtered = builder.filter_observable_peers(
+        ego_heading_deg=ego_state.heading,
+        ego_pos=(ego_state.x, ego_state.y),
+        peer_observations=peers,
+    )
+
+    assert filtered == []
+
+
 def test_build_observation_min_peer_accel_reflects_braking():
     """min_peer_accel in ego vector reflects the most negative peer accel."""
     builder = ObservationBuilder()
@@ -179,28 +210,16 @@ def test_build_observation_all_stale_peers_excluded():
     assert result["peer_mask"].sum() == pytest.approx(0.0)
 
 
-def test_build_observation_progress_feature():
-    """ego[6] reflects the normalized episode progress."""
+def test_build_observation_braking_received_decay():
+    """ego[5] reflects the braking_received decay value."""
     builder = ObservationBuilder()
     ego_state = _make_ego_state()
 
-    result_mid = builder.build(ego_state, [], (ego_state.x, ego_state.y), progress=0.5)
-    assert result_mid["ego"][6] == pytest.approx(0.5)
+    result = builder.build(ego_state, [], (ego_state.x, ego_state.y), braking_received=0.75)
+    assert result["ego"][5] == pytest.approx(0.75)
 
-    result_start = builder.build(ego_state, [], (ego_state.x, ego_state.y), progress=0.0)
-    assert result_start["ego"][6] == pytest.approx(0.0)
+    result_zero = builder.build(ego_state, [], (ego_state.x, ego_state.y), braking_received=0.0)
+    assert result_zero["ego"][5] == pytest.approx(0.0)
 
-    result_end = builder.build(ego_state, [], (ego_state.x, ego_state.y), progress=1.0)
-    assert result_end["ego"][6] == pytest.approx(1.0)
-
-
-def test_build_observation_progress_clamped():
-    """Progress is clamped to [0, 1]."""
-    builder = ObservationBuilder()
-    ego_state = _make_ego_state()
-
-    result = builder.build(ego_state, [], (ego_state.x, ego_state.y), progress=1.5)
-    assert result["ego"][6] == pytest.approx(1.0)
-
-    result_neg = builder.build(ego_state, [], (ego_state.x, ego_state.y), progress=-0.1)
-    assert result_neg["ego"][6] == pytest.approx(0.0)
+    result_one = builder.build(ego_state, [], (ego_state.x, ego_state.y), braking_received=1.0)
+    assert result_one["ego"][5] == pytest.approx(1.0)

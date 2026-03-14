@@ -31,6 +31,7 @@ class ConvoyEnv(gym.Env):
     COLLISION_DIST = 5.0
     MAX_STARTUP_STEPS = 100
     BRAKING_ACCEL_THRESHOLD = -2.5
+    BRAKING_DECAY = 0.95  # per-step at 10Hz → half-life ~1.35s
     CF_OVERRIDE_GRACE_STEPS = 3
 
     def __init__(
@@ -104,12 +105,12 @@ class ConvoyEnv(gym.Env):
         self._hazard_injection_step: Optional[int] = None
         self._cf_override_active = False
         self._hazard_source_braking_latched = False
-        self._braking_received_latched = False
+        self._braking_received_decay = 0.0
 
         self.observation_space = spaces.Dict({
             "ego": spaces.Box(
-                low=np.array([0.0, -1.0, -1.0, 0.0, -1.0, 0.0, 0.0], dtype=np.float32),
-                high=np.array([1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0], dtype=np.float32),
+                low=np.array([0.0, -1.0, -1.0, 0.0, -1.0, 0.0], dtype=np.float32),
+                high=np.array([1.0, 1.0, 1.0, 1.0, 0.0, 1.0], dtype=np.float32),
                 dtype=np.float32,
             ),
             "peers": spaces.Box(
@@ -185,7 +186,7 @@ class ConvoyEnv(gym.Env):
         self._hazard_injection_step = None
         self._cf_override_active = False
         self._hazard_source_braking_latched = False
-        self._braking_received_latched = False
+        self._braking_received_decay = 0.0
 
         scenario_id = None
         if self.scenario_manager is not None:
@@ -256,8 +257,8 @@ class ConvoyEnv(gym.Env):
             )
 
         # Warmup is pre-episode stabilization. Do not carry warmup braking
-        # events into the RL episode latch.
-        self._braking_received_latched = False
+        # events into the RL episode decay.
+        self._braking_received_decay = 0.0
 
         if self.hazard_injector is not None:
             hazard_options = self._extract_hazard_options(options)
@@ -291,7 +292,7 @@ class ConvoyEnv(gym.Env):
         # Must check BEFORE any TraCI calls (apply/inject) to avoid crash.
         if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
             empty_obs = {
-                "ego": np.zeros(7, dtype=np.float32),
+                "ego": np.zeros(6, dtype=np.float32),
                 "peers": np.zeros((self.MAX_PEERS, 6), dtype=np.float32),
                 "peer_mask": np.zeros(self.MAX_PEERS, dtype=np.float32),
             }
@@ -336,7 +337,7 @@ class ConvoyEnv(gym.Env):
         # Post-step guard: V001 may have left during this sumo.step().
         if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
             empty_obs = {
-                "ego": np.zeros(7, dtype=np.float32),
+                "ego": np.zeros(6, dtype=np.float32),
                 "peers": np.zeros((self.MAX_PEERS, 6), dtype=np.float32),
                 "peer_mask": np.zeros(self.MAX_PEERS, dtype=np.float32),
             }
@@ -350,14 +351,12 @@ class ConvoyEnv(gym.Env):
         ego_state = self.sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
         current_time_ms = int(self.sumo.get_simulation_time() * 1000)
 
-        progress = self._step_count / self.max_steps
-
         (
             observation,
             peer_states,
             received_map,
             any_braking_peer_received,
-        ) = self._step_espnow(ego_state, current_time_ms, progress=progress)
+        ) = self._step_espnow(ego_state, current_time_ms)
         distance, closing_rate = self._calculate_min_distance_and_closing_rate(
             ego_state, peer_states
         )
@@ -416,24 +415,20 @@ class ConvoyEnv(gym.Env):
 
         ego_speed = ego_state.speed
 
-        # Fix 1 (Run 017): reward uses the SAME latched braking signal
-        # that drives ego[5], not the hazard-source-only latch.
+        # Run 020: reward uses the SAME decaying braking signal that
+        # drives ego[5].  Reward terms scale by the decay value so the
+        # shaping fades smoothly — no obs/reward mismatch.
         reward, reward_info = self.reward_calculator.calculate(
             distance=distance,
             action_value=action_value,
             deceleration=actual_decel,
             closing_rate=closing_rate,
             any_braking_peer=any_braking_peer_received,
-            braking_received=self._braking_received_latched,
+            braking_received=self._braking_received_decay,
             ego_speed=ego_speed,
         )
 
         mesh_received_source_ids = sorted(received_map.keys())
-
-        # Fix 5 (Run 017): instrumentation for diagnostic telemetry.
-        obs_reward_gate_divergence = int(
-            self._braking_received_latched != hazard_source_braking_received
-        )
 
         info = {
             "step": self._step_count,
@@ -447,9 +442,8 @@ class ConvoyEnv(gym.Env):
             "hazard_injection_failed_reason": hazard_injection_failed_reason,
             "mesh_received_source_ids": mesh_received_source_ids,
             "mesh_any_braking_peer_received": any_braking_peer_received,
-            "braking_received_latched": self._braking_received_latched,
+            "braking_received_decay": self._braking_received_decay,
             "hazard_source_braking_latched": self._hazard_source_braking_latched,
-            "obs_reward_gate_divergence": obs_reward_gate_divergence,
             "ego_speed": ego_speed,
             **reward_info,
         }
@@ -460,7 +454,6 @@ class ConvoyEnv(gym.Env):
         self,
         ego_state: VehicleState,
         current_time_ms: int,
-        progress: float = 0.0,
         update_braking_latch: bool = True,
     ) -> Tuple[
         Dict[str, np.ndarray],
@@ -491,7 +484,6 @@ class ConvoyEnv(gym.Env):
             )
 
         mesh_visible_peer_states: List[VehicleState] = []
-        any_braking_peer_received = False
 
         for received in received_map.values():
             msg = received.message
@@ -521,18 +513,28 @@ class ConvoyEnv(gym.Env):
                     lane_position=0.0,
                 )
             )
-            if float(msg.accel_x) <= self.BRAKING_ACCEL_THRESHOLD:
-                any_braking_peer_received = True
 
-        if update_braking_latch and any_braking_peer_received:
-            self._braking_received_latched = True
+        cone_filtered_peers = self.obs_builder.filter_observable_peers(
+            ego_heading_deg=ego_state.heading,
+            ego_pos=ego_pos,
+            peer_observations=peer_observations,
+        )
+        any_braking_peer_received = any(
+            float(peer["accel"]) <= self.BRAKING_ACCEL_THRESHOLD
+            for peer in cone_filtered_peers
+        )
+
+        if update_braking_latch:
+            if any_braking_peer_received:
+                self._braking_received_decay = 1.0
+            else:
+                self._braking_received_decay *= self.BRAKING_DECAY
 
         observation = self.obs_builder.build(
             ego_state=ego_state,
             peer_observations=peer_observations,
             ego_pos=ego_pos,
-            braking_received=self._braking_received_latched,
-            progress=progress,
+            braking_received=self._braking_received_decay,
         )
 
         return (

@@ -164,9 +164,10 @@ def test_braking_peer_in_observation(make_env):
             # After hazard injection, check for braking signal
             if step > 162 and obs["ego"][4] < -0.03:
                 found_braking_signal = True
-                # Binary braking_received flag (ego[5]) must also be set
-                assert obs["ego"][5] == pytest.approx(1.0), (
-                    f"braking_received flag not set when min_peer_accel={obs['ego'][4]}"
+                # Decay braking_received (ego[5]) must be elevated
+                assert obs["ego"][5] > 0.5, (
+                    f"braking_received_decay too low ({obs['ego'][5]}) "
+                    f"when min_peer_accel={obs['ego'][4]}"
                 )
                 break
 
@@ -220,20 +221,31 @@ def test_hazard_reward_terms_disabled(make_env):
 def test_ignoring_hazard_penalty_persists_past_active_slowdown(make_env):
     """
     Once the injected source's braking signal reaches ego, the ignoring-hazard
-    penalty should persist for the rest of the hazard event, not only during
-    the 2-4s active slowDown() window.
+    penalty should persist beyond the active slowDown() window via the
+    exponential decay signal (Run 020).
 
-    Run 017 update: the penalty is now suppressed when ego is stopped
-    (speed <= 0.5 m/s). So we allow gaps only when the speed gate is active
-    (info['ignoring_penalty_suppressed_for_stop'] is True).
+    With BRAKING_DECAY=0.95, the signal stays above 0.01 for ~90 steps
+    after braking ends. The test verifies:
+    1. Penalty fires after hazard injection
+    2. Penalty persists for at least 30 steps after slowDown completes
+       (bounded temporal memory from decay)
+    3. Penalty eventually fades (self-clearing by design)
+
+    Run 017 update: the penalty is suppressed when ego is stopped
+    (speed <= 0.5 m/s). Those steps don't count against persistence.
     """
     from ml.envs.hazard_injector import HazardInjector
 
     hazard_step = 80
     max_slowdown_steps = int(
         HazardInjector.BRAKING_DURATION_MAX / HazardInjector.STEP_LENGTH
-    )  # 40
-    slowdown_done_step = hazard_step + max_slowdown_steps  # 120
+    )  # 15
+    slowdown_done_step = hazard_step + max_slowdown_steps  # 95
+
+    # Minimum post-slowdown steps where penalty should still fire.
+    # With decay=0.95, signal stays above 0.01 for ~90 steps.
+    # Require at least 30 to confirm bounded persistence.
+    MIN_POST_SLOWDOWN_PENALTY_STEPS = 30
 
     env = make_env(max_steps=260)
     env.hazard_injector.HAZARD_WINDOW_START = 0
@@ -243,7 +255,7 @@ def test_ignoring_hazard_penalty_persists_past_active_slowdown(make_env):
 
     first_penalty_step = None
     post_slowdown_penalty = 0
-    post_slowdown_unexplained_gap = 0
+    post_slowdown_suppressed = 0
 
     for step in range(260):
         obs, reward, terminated, truncated, step_info = env.step(
@@ -258,13 +270,13 @@ def test_ignoring_hazard_penalty_persists_past_active_slowdown(make_env):
         if has_penalty and first_penalty_step is None:
             first_penalty_step = step
 
-        # After slowDown is guaranteed complete, track whether penalty persists
+        # After slowDown is guaranteed complete, track persistence
         if step > slowdown_done_step and not (terminated or truncated):
             if has_penalty:
                 post_slowdown_penalty += 1
-            elif not suppressed_for_stop:
-                # Gap that is NOT explained by the stopped-car speed gate
-                post_slowdown_unexplained_gap += 1
+            elif suppressed_for_stop:
+                post_slowdown_suppressed += 1
+            # else: decay faded below threshold — expected with Run 020
 
         if terminated or truncated:
             break
@@ -272,14 +284,10 @@ def test_ignoring_hazard_penalty_persists_past_active_slowdown(make_env):
     assert first_penalty_step is not None, (
         "Ignoring-hazard penalty never activated after forced hazard injection."
     )
-    assert post_slowdown_penalty > 0, (
-        f"No ignoring-hazard penalty detected after slowDown window "
-        f"(step {slowdown_done_step}). The latch is not working."
-    )
-    assert post_slowdown_unexplained_gap == 0, (
-        f"Ignoring-hazard penalty had {post_slowdown_unexplained_gap} "
-        f"unexplained gap(s) after slowDown completed (step {slowdown_done_step}). "
-        f"The latch dropped before episode end."
+    assert post_slowdown_penalty >= MIN_POST_SLOWDOWN_PENALTY_STEPS, (
+        f"Only {post_slowdown_penalty} penalty steps after slowDown window "
+        f"(step {slowdown_done_step}), expected >= {MIN_POST_SLOWDOWN_PENALTY_STEPS}. "
+        f"Decay signal is not providing enough temporal memory."
     )
 
 
@@ -353,7 +361,7 @@ def test_emulator_resets_per_episode(make_env):
     # The key check: observation is valid and finite
     assert np.isfinite(obs["ego"]).all()
     assert np.isfinite(obs["peers"]).all()
-    assert obs["ego"].shape == (7,)
+    assert obs["ego"].shape == (6,)
 
 
 # --- Smoke training test ---

@@ -412,15 +412,15 @@ def test_hazard_source_braking_signal_latches_across_steps(
     _, _, _, _, info1 = env_with_mocks.step(np.array([0.0], dtype=np.float32))
     _, _, _, _, info2 = env_with_mocks.step(np.array([0.0], dtype=np.float32))
 
-    assert info1["braking_received_latched"] is True
+    assert info1["braking_received_decay"] == pytest.approx(1.0)
     assert info1["hazard_source_braking_latched"] is True
     assert info1["reward_ignoring_hazard"] == pytest.approx(-5.0)
 
-    # Pre-fix bug: this became False as soon as slowDown() ended and accel_x=0.
-    # Both latches stay active across steps.
-    assert info2["braking_received_latched"] is True
+    # Step 2: peer accel_x=0.0 → no trigger, decay applies.
+    # braking_received_decay = 1.0 * 0.95 = 0.95 (still > 0.01).
+    assert info2["braking_received_decay"] == pytest.approx(0.95)
     assert info2["hazard_source_braking_latched"] is True
-    assert info2["reward_ignoring_hazard"] == pytest.approx(-5.0)
+    assert info2["reward_ignoring_hazard"] == pytest.approx(-5.0 * 0.95)
 
 
 def test_reset_clears_hazard_source_braking_latch(env_with_mocks):
@@ -433,14 +433,41 @@ def test_reset_clears_hazard_source_braking_latch(env_with_mocks):
     assert env_with_mocks._hazard_source_braking_latched is False
 
 
-def test_reset_clears_braking_received_latch(env_with_mocks):
-    """Episode reset must clear the observation braking_received latch."""
+def test_behind_braking_peer_does_not_trigger_braking_received_decay(
+    env_with_mocks,
+    mock_emulator,
+):
+    """Run 020: post-cone braking decay ignores peers behind ego."""
     env_with_mocks.reset()
-    env_with_mocks._braking_received_latched = True
+    env_with_mocks.hazard_injector = None
+
+    mock_emulator.simulate_mesh_step.return_value = {
+        "V002": _make_received_message(
+            "V002",
+            x=0.0,
+            y=-25.0,
+            age_ms=10,
+            hop_count=0,
+            speed=6.0,
+            accel_x=-4.0,
+        ),
+    }
+
+    _, _, _, _, info = env_with_mocks.step(np.array([0.0], dtype=np.float32))
+
+    assert info["mesh_any_braking_peer_received"] is False
+    assert info["braking_received_decay"] == pytest.approx(0.0)
+    assert info["reward_ignoring_hazard"] == pytest.approx(0.0)
+
+
+def test_reset_clears_braking_received_decay(env_with_mocks):
+    """Episode reset must clear the observation braking_received decay."""
+    env_with_mocks.reset()
+    env_with_mocks._braking_received_decay = 0.8
 
     env_with_mocks.reset()
 
-    assert env_with_mocks._braking_received_latched is False
+    assert env_with_mocks._braking_received_decay == pytest.approx(0.0)
 
 
 def test_reset_does_not_carry_warmup_braking_into_episode(
@@ -472,7 +499,7 @@ def test_reset_does_not_carry_warmup_braking_into_episode(
 
     obs, _ = env_with_mocks.reset()
 
-    assert env_with_mocks._braking_received_latched is False
+    assert env_with_mocks._braking_received_decay == pytest.approx(0.0)
     assert obs["ego"][5] == pytest.approx(0.0)
 
 
@@ -489,7 +516,7 @@ def test_reset_observation_shape_is_dict(env_with_mocks):
     obs, _ = env_with_mocks.reset()
 
     assert set(obs.keys()) == {"ego", "peers", "peer_mask"}
-    assert obs["ego"].shape == (7,)
+    assert obs["ego"].shape == (6,)
     assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
     assert obs["peer_mask"].shape == (ObservationBuilder.MAX_PEERS,)
     assert obs["ego"].dtype == np.float32
@@ -760,7 +787,7 @@ def test_ego_exit_sets_truncated_true(env_with_mocks, mock_sumo):
     assert truncated is True
     assert terminated is False
     assert reward == 0.0
-    assert obs["ego"].shape == (7,)
+    assert obs["ego"].shape == (6,)
     assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
     assert info.get("truncated_reason") == "ego_route_ended"
 
