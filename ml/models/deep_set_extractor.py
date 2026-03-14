@@ -25,7 +25,7 @@ class DeepSetExtractor(BaseFeaturesExtractor):
         self,
         observation_space: gym.spaces.Dict,
         peer_feature_dim: int = 6,
-        ego_feature_dim: int = 7,
+        ego_feature_dim: int = 6,
         embed_dim: int = 32,
     ):
         if not isinstance(observation_space, gym.spaces.Dict):
@@ -56,12 +56,12 @@ class DeepSetExtractor(BaseFeaturesExtractor):
         """
         Args:
             observations: Dict with keys:
-                - 'ego': (batch, 7) ego features
+                - 'ego': (batch, 6) ego features
                 - 'peers': (batch, 8, 6) peer features
                 - 'peer_mask': (batch, 8) validity mask (1=valid, 0=padded)
 
         Returns:
-            features: (batch, 39) combined features for policy head
+            features: (batch, 38) combined features for policy head
         """
         ego = observations["ego"]
         peers = observations["peers"]

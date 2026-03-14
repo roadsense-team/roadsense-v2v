@@ -12,9 +12,15 @@ Usage:
     python -m ml.scripts.validate_against_real_data \
         --tx_csv /path/to/V001_tx_004.csv \
         --rx_csv /path/to/V001_rx_004.csv \
-        --model_path ml/results/cloud_prod_011/model_final.zip \
+        --model_path ml/results/cloud_prod_019/model_final.zip \
         --output_dir ml/data/sim_to_real_validation \
         --forward_axis y
+
+    # Replay-side braking signal synthesis (Run 020):
+    #   --braking_received_mode decay     # default — exponential decay (0.95/step)
+    #   --braking_received_mode latched   # legacy sticky latch (regression analysis)
+    #   --braking_received_mode instant   # per-step only, no memory
+    #   --braking_received_mode off       # force ego[5] = 0 throughout replay
 """
 
 import argparse
@@ -46,6 +52,7 @@ STEP_MS = 100  # 10 Hz replay rate (matches sensor broadcast rate)
 STALENESS_THRESHOLD_MS = 500.0
 BRAKING_THRESHOLD_MS2 = -1.0  # accel below this = braking event (analysis)
 V2V_BRAKING_ACCEL_THRESHOLD = -2.5  # matches ConvoyEnv.BRAKING_ACCEL_THRESHOLD
+BRAKING_DECAY = 0.95  # matches ConvoyEnv.BRAKING_DECAY
 MODEL_ACTION_THRESHOLD = 0.1  # model action above this = model brakes
 MAX_DECEL = 8.0  # m/s², matches training
 
@@ -198,12 +205,50 @@ def detect_braking_events(
     return events
 
 
+def _update_braking_received_decay(
+    any_braking_this_step: bool,
+    current_decay: float,
+    mode: str,
+) -> float:
+    """
+    Update replay-side braking_received signal.
+
+    Modes:
+      - decay: exponential decay (default, deployment-canonical)
+      - latched: sticky forever (legacy, for regression analysis)
+      - instant: true only on steps with current braking evidence
+      - off: always 0.0
+
+    Returns:
+        Updated braking_received value in [0.0, 1.0].
+    """
+    if mode == "off":
+        return 0.0
+
+    if mode == "instant":
+        return 1.0 if any_braking_this_step else 0.0
+
+    if mode == "latched":
+        if any_braking_this_step:
+            return 1.0
+        return current_decay  # stays at whatever it was (sticky)
+
+    if mode != "decay":
+        raise ValueError(f"Unknown braking_received_mode: {mode}")
+
+    # Decay mode: reset to 1.0 on trigger, else multiply by decay factor
+    if any_braking_this_step:
+        return 1.0
+    return current_decay * BRAKING_DECAY
+
+
 def run_replay(
     tx_rows: List[SensorRow],
     rx_rows: List[SensorRow],
     model,
     output_dir: Path,
     recording_name: str,
+    braking_received_mode: str = "decay",
 ) -> Dict:
     """
     Replay real data through the model and generate validation report.
@@ -236,11 +281,12 @@ def run_replay(
         "model_decel_ms2": [],
         "peer_count": [],
         "min_peer_accel": [],
+        "braking_received": [],
+        "any_braking_peer": [],
     }
 
-    last_ego: Optional[SensorRow] = None
     rx_window_start = 0
-    braking_received_latched = False
+    braking_received_value = 0.0
 
     total_replay_steps = len(steps)
     print(f"Replaying {total_replay_steps} steps ({(t_end - t_start) / 1000:.1f}s) ...")
@@ -258,7 +304,6 @@ def run_replay(
         if ego_row is None:
             continue
 
-        last_ego = ego_row
         ego_state, ego_pos = build_ego_state(ego_row)
 
         # Advance RX window: collect messages in [step_t - staleness, step_t]
@@ -273,21 +318,26 @@ def run_replay(
             rx_window.append(r)
 
         peer_obs = build_peer_observations(rx_window, step_t)
+        cone_filtered_peers = obs_builder.filter_observable_peers(
+            ego_heading_deg=ego_state.heading,
+            ego_pos=ego_pos,
+            peer_observations=peer_obs,
+        )
+        any_braking_this_step = any(
+            p.get("accel", 0.0) <= V2V_BRAKING_ACCEL_THRESHOLD
+            for p in cone_filtered_peers
+        )
+        braking_received_value = _update_braking_received_decay(
+            any_braking_this_step=any_braking_this_step,
+            current_decay=braking_received_value,
+            mode=braking_received_mode,
+        )
 
-        # Compute braking_received with latch (matches training env behavior)
-        for p in peer_obs:
-            if p.get("accel", 0.0) <= V2V_BRAKING_ACCEL_THRESHOLD:
-                braking_received_latched = True
-                break
-
-        # Build observation (progress = step fraction of total replay)
-        replay_progress = step_idx / max(1, total_replay_steps)
         observation = obs_builder.build(
             ego_state=ego_state,
             peer_observations=peer_obs,
             ego_pos=ego_pos,
-            braking_received=braking_received_latched,
-            progress=replay_progress,
+            braking_received=braking_received_value,
         )
 
         # Model inference
@@ -298,7 +348,7 @@ def run_replay(
         # Count visible peers from observation
         visible_peers = int(np.sum(observation["peer_mask"]))
         min_pa = float(observation["ego"][4]) * obs_builder.MAX_ACCEL
-        braking_received = float(observation["ego"][5]) > 0.5
+        braking_received_obs = float(observation["ego"][5])
 
         results["timestamps_ms"].append(step_t)
         results["ego_speed"].append(float(ego_row.speed))
@@ -308,6 +358,8 @@ def run_replay(
         results["model_decel_ms2"].append(decel_ms2)
         results["peer_count"].append(visible_peers)
         results["min_peer_accel"].append(min_pa)
+        results["braking_received"].append(braking_received_obs)
+        results["any_braking_peer"].append(any_braking_this_step)
 
     print(f"  Completed: {len(results['timestamps_ms'])} steps with model output")
 
@@ -415,6 +467,7 @@ def run_replay(
         },
         "model_action_threshold": MODEL_ACTION_THRESHOLD,
         "max_decel_ms2": MAX_DECEL,
+        "braking_received_mode": braking_received_mode,
     }
 
     # Save results
@@ -436,6 +489,8 @@ def run_replay(
         model_decel_ms2=model_decel,
         peer_count=peer_count,
         min_peer_accel=np.array(results["min_peer_accel"]),
+        braking_received=np.array(results["braking_received"], dtype=np.float32),
+        any_braking_peer=np.array(results["any_braking_peer"], dtype=bool),
     )
     print(f"  Timeseries saved: {timeseries_path}")
 
@@ -450,6 +505,7 @@ def print_report(report: Dict) -> None:
     print("=" * 72)
     print(f"  Duration:        {report['duration_s']:.1f}s ({report['total_steps']} steps)")
     print(f"  Peers visible:   {report['pct_time_with_peers']:.1f}% of time")
+    print(f"  Braking signal:  {report['braking_received_mode']}")
     print()
 
     # Sensitivity
@@ -501,6 +557,15 @@ def main():
                         help="Which accelerometer axis is forward (default: y)")
     parser.add_argument("--recording_name", type=str, default=None,
                         help="Label for this recording (auto-detected from filename)")
+    parser.add_argument(
+        "--braking_received_mode",
+        choices=["decay", "latched", "instant", "off"],
+        default="decay",
+        help="How to synthesize replay-side braking_received (ego[5]). "
+             "'decay' (default) matches Run 020 training: exponential decay "
+             "with factor 0.95/step. 'latched'/'instant'/'off' kept for "
+             "regression analysis against earlier runs.",
+    )
     args = parser.parse_args()
 
     # Validate inputs
@@ -523,12 +588,17 @@ def main():
     unique_peers = set(r.vehicle_id for r in rx_rows)
     print(f"  Peers: {sorted(unique_peers)}")
 
+    print(f"Braking signal mode: {args.braking_received_mode}")
+
     print(f"Loading model: {args.model_path}")
     from stable_baselines3 import PPO
     model = PPO.load(str(args.model_path))
     print("  Model loaded successfully")
 
-    report = run_replay(tx_rows, rx_rows, model, args.output_dir, recording_name)
+    report = run_replay(
+        tx_rows, rx_rows, model, args.output_dir, recording_name,
+        braking_received_mode=args.braking_received_mode,
+    )
     print_report(report)
 
     # Print verdict

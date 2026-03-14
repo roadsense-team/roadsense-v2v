@@ -1,10 +1,12 @@
 """
 Reward calculation utilities for ConvoyEnv.
 
-Run 017 — Linear Ramp + Aligned V2V Response Terms + Speed-Gated Penalty.
-Builds on Run 009 ramp structure.  Run 017 changes:
-  - Reward gate uses the SAME braking_received latch that drives ego[5]
-    (was hazard-source-only in Runs 013-016, causing obs/reward desync).
+Run 020 — Linear Ramp + Decay-Scaled V2V Response Terms + Speed-Gated Penalty.
+Builds on Run 009 ramp structure.  Run 020 changes vs Run 017:
+  - braking_received is now a float in [0, 1] (exponential decay, half-life
+    ~1.35s at 10 Hz).  Reward terms scale by this value so the shaping fades
+    smoothly — no obs/reward mismatch.
+  - progress feature removed (deployment-incompatible).
   - PENALTY_IGNORING_HAZARD suppressed when ego is stopped (speed <= 0.5 m/s).
   - REWARD_EARLY_REACTION: bonus when ego brakes while braking signal is active
     AND distance is still > EARLY_REACTION_DIST.
@@ -132,14 +134,14 @@ class RewardCalculator:
         deceleration: float,
         closing_rate: float = 0.0,
         any_braking_peer: bool = False,
-        braking_received: bool = False,
+        braking_received: float = 0.0,
         ego_speed: float = 10.0,
     ) -> Tuple[float, Dict]:
         """Calculate total reward for current step.
 
-        braking_received: aligned latched signal — same bit that drives ego[5].
-            True once any valid peer hard-brake message has been received this
-            episode.  Used for ignoring-hazard penalty and early-reaction bonus.
+        braking_received: exponential-decay signal in [0, 1] — same value
+            that drives ego[5].  Reward terms are scaled by this value so
+            the shaping fades smoothly with the observation signal.
         ego_speed: current ego speed in m/s.  Used to suppress the ignoring
             penalty when ego is already stopped.
         """
@@ -155,7 +157,7 @@ class RewardCalculator:
         ignoring_hazard = 0.0
         ignoring_penalty_suppressed_for_stop = False
 
-        if braking_received:
+        if braking_received > 0.01:
             decel_abs = abs(deceleration)
             is_braking = decel_abs > self.GENTLE_DECEL_THRESHOLD
             is_stopped = ego_speed <= self.STOPPED_SPEED_THRESHOLD
@@ -164,9 +166,9 @@ class RewardCalculator:
                 if is_stopped:
                     ignoring_penalty_suppressed_for_stop = True
                 else:
-                    ignoring_hazard = self.PENALTY_IGNORING_HAZARD
+                    ignoring_hazard = self.PENALTY_IGNORING_HAZARD * braking_received
             elif distance > self.EARLY_REACTION_DIST:
-                early_reaction = self.REWARD_EARLY_REACTION
+                early_reaction = self.REWARD_EARLY_REACTION * braking_received
 
         total = (
             safety + comfort + appropriateness

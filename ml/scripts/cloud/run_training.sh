@@ -1,66 +1,65 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 019 - Full Production Run (10M steps)
+# RoadSense Training Run 020 - Diagnostic Retrain (2M steps)
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
 # BEFORE LAUNCHING - customize these variables:
 #   RUN_ID        - Unique run identifier
 #   GITHUB_PAT    - Your GitHub Personal Access Token
-#   TOTAL_STEPS   - Training timesteps (default: 10000000 for production run)
+#   TOTAL_STEPS   - Training timesteps (default: 2000000 for diagnostic run)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 019 — Production run. Run 018 (2M diagnostic) validated the fix:
+# Run 020 — Deployment-compatible observation retrain.
 #
-#   Run 018 results (2M steps):
-#     - V2V reaction: 100% (276/276) across all ranks and peer counts
-#     - Avg reward: +691.72 (vs Run 011's -86.62)
-#     - Collision rate: 0%, Behavioral success: 98.2%
-#     - Explained variance: 0.71-0.93 (critic alive from step ~28k)
-#     - Std: 0.603 -> 0.091 (still converging — room for 10M improvement)
-#     - Reaction times: 0.21-1.49s (10x faster than Run 011's 2.88-11.02s)
-#     - 15/15 eval matrix buckets covered
+#   Why Run 020 exists:
+#     - Run 019 was the best SUMO model (100% V2V reaction, 0% collisions)
+#       but was NOT deployable on real data.
+#     - Root cause: deployment-incompatible observation semantics
+#       * sticky braking_received latch
+#       * progress feature with no deployment meaning
+#     - Run 020 replaces that with a deployment-compatible observation:
+#       * ego[5] = post-cone exponential-decay braking_received
+#       * progress removed
+#       * reward terms scaled by the same decay signal (obs/reward aligned)
 #
-#   Changes from Run 018:
-#     1. TOTAL_STEPS: 2M -> 10M (production run, not diagnostic)
-#     2. Monitor wrapper added to training env (enables rollout/ep_rew_mean
-#        and rollout/ep_len_mean logging that was missing in Run 018)
+#   Code status before launch:
+#     - Local unit suite passed after final post-cone update
+#     - Docker integration suite passed after final post-cone update
 #
-#   All Run 018 fixes still active:
+#   Load-bearing fixes preserved from Runs 018/019:
 #     - Faster slowDown: BRAKING_DURATION 0.5-1.5s (signal strength fix)
 #     - VecNormalize(norm_obs=False, norm_reward=True) (reward normalization)
-#     - Warmup contamination fix (Codex)
-#     - All 5 Run 017 structural fixes (reward alignment, progress feature,
-#       fixed hazard timing, speed-gated penalty, instrumentation)
-#     - CF override, Deep Sets, features_dim=39
+#     - Warmup contamination fix
+#     - CF override
+#     - HAZARD_PROBABILITY=1.0
+#     - Deep Sets, features_dim=38 (32 embed + 6 ego)
 #     - Hyperparams: LR=1e-4, n_steps=4096, ent_coef=0.0, log_std_init=-0.5
-#     - Dataset: base_real, seed=42, 25 train + 40 eval
+#     - Dataset generation from base_real, seed=42, 25 train + 40 eval
 #
-#   Expected behavior (based on Run 018 trajectory):
-#     - explained_variance > 0.7 by 100k
-#     - std converges below 0.05 (Run 011 reached 0.043 at 10M)
-#     - V2V reaction stays 100%
-#     - ep_rew_mean should be visible in logs (Monitor fix)
+#   This is a 2M DIAGNOSTIC run, not the 10M production run.
+#   Kill criteria from Run 020 plan:
+#     - explained_variance must exceed 0.1 by 500k
+#     - if explained_variance stays ~0 at 500k -> KILL and diagnose
+#     - V2V reaction at 2M checkpoint must exceed 50%
 #
-#   This run should produce the final model for:
-#     - H5 sim-to-real validation
-#     - TFLite INT8 quantization
-#     - ESP32 deployment
-#     - Professor PoC demo
+#   If this run passes:
+#     - promote same config to a 10M production run
+#     - then rerun real-data validation
 # =============================================================================
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_019"
+RUN_ID="cloud_prod_020"
 GITHUB_PAT="<YOUR_PAT_HERE>"
-TOTAL_STEPS=10000000
+TOTAL_STEPS=2000000
 S3_BUCKET="saferide-training-results"
 # ===========================================================
 
 export AWS_DEFAULT_REGION=il-central-1
 export AWS_REGION="$AWS_DEFAULT_REGION"
 WORK_DIR="/home/ubuntu/work"
-DATASET_DIR="ml/scenarios/datasets/dataset_v9"
+DATASET_DIR="ml/scenarios/datasets/dataset_v10_run020_post_cone"
 EMULATOR_PARAMS="ml/espnow_emulator/emulator_params_measured.json"
 
 # -------------------------------------------------------------------
@@ -115,8 +114,8 @@ echo "[2/7] Rebuilding Docker image (cached - should be fast)..."
 cd "$WORK_DIR/ml"
 docker build -t roadsense-ml:latest .
 
-# 3. Generate dataset_v9 from base_real (same canonical params)
-echo "[3/7] Generating dataset_v9 from base_real..."
+# 3. Generate Run 020 dataset from base_real (same canonical params)
+echo "[3/7] Generating Run 020 dataset from base_real..."
 cd "$WORK_DIR"
 ./ml/run_docker.sh generate \
     --base_dir ml/scenarios/base_real \

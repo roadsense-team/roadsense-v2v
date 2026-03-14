@@ -59,3 +59,4 @@ timeseries_*.npz
 training-run*.log
 events.out.tfevents.*
 cloud_prod_014*
+vecnormalize.pkl

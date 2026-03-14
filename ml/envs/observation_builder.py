@@ -15,7 +15,7 @@ class ObservationBuilder:
     Builds observation dict for variable-n peer environments.
 
     Keys:
-        - ego: [speed/30, accel/10, heading/pi, peer_count/8, min_peer_accel/10, braking_received, progress]
+        - ego: [speed/30, accel/10, heading/pi, peer_count/8, min_peer_accel/10, braking_received_decay]
         - peers: (MAX_PEERS, 6) peer features
         - peer_mask: (MAX_PEERS,) 1.0 for valid peers, 0.0 for padding
     """
@@ -54,31 +54,45 @@ class ObservationBuilder:
         diff = (peer_sumo_angle - ego_heading_deg + 180.0) % 360.0 - 180.0
         return abs(diff) <= half_angle_deg
 
-    def build(
+    def filter_observable_peers(
         self,
-        ego_state: VehicleState,
-        peer_observations: List[Dict[str, float]],
+        ego_heading_deg: float,
         ego_pos: Tuple[float, float],
-        braking_received: bool = False,
-        progress: float = 0.0,
-    ) -> Dict[str, np.ndarray]:
-        """
-        Build observation dict from ego state and variable peer list.
-
-        Args:
-            progress: current_step / max_steps, normalized episode progress [0, 1].
-
-        Returns:
-            Dict with 'ego', 'peers', and 'peer_mask' arrays
-        """
-        ego_heading_deg = ego_state.heading
-        
+        peer_observations: List[Dict[str, float]],
+    ) -> List[Dict[str, float]]:
+        """Return the valid peer observations that survive ego cone filtering."""
         filtered_peers = []
         for peer in peer_observations:
             if not peer.get("valid", True):
                 continue
             if self.is_in_cone(ego_heading_deg, ego_pos, peer["x"], peer["y"]):
                 filtered_peers.append(peer)
+        return filtered_peers
+
+    def build(
+        self,
+        ego_state: VehicleState,
+        peer_observations: List[Dict[str, float]],
+        ego_pos: Tuple[float, float],
+        braking_received: float = 0.0,
+    ) -> Dict[str, np.ndarray]:
+        """
+        Build observation dict from ego state and variable peer list.
+
+        Args:
+            braking_received: exponential-decay braking signal in [0, 1].
+                1.0 = peer hard-braking this step, decays by 0.95/step.
+
+        Returns:
+            Dict with 'ego', 'peers', and 'peer_mask' arrays
+        """
+        ego_heading_deg = ego_state.heading
+
+        filtered_peers = self.filter_observable_peers(
+            ego_heading_deg=ego_heading_deg,
+            ego_pos=ego_pos,
+            peer_observations=peer_observations,
+        )
 
         peers = np.zeros((self.MAX_PEERS, 6), dtype=np.float32)
         peer_mask = np.zeros((self.MAX_PEERS,), dtype=np.float32)
@@ -127,8 +141,7 @@ class ObservationBuilder:
                 ((ego_heading_deg + 180.0) % 360.0 - 180.0) / 180.0,
                 valid_count / self.MAX_PEERS,
                 min_peer_accel / self.MAX_ACCEL,
-                1.0 if braking_received else 0.0,
-                max(0.0, min(1.0, float(progress))),
+                float(braking_received),
             ],
             dtype=np.float32,
         )
