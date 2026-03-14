@@ -440,6 +440,18 @@ class ConvoyEnv(gym.Env):
             "hazard_source_rank_ahead": hazard_source_rank_ahead,
             "hazard_injection_attempted": hazard_injection_attempted,
             "hazard_injection_failed_reason": hazard_injection_failed_reason,
+            "hazard_desired_decel": (
+                self.hazard_injector.desired_decel
+                if self.hazard_injector is not None else None
+            ),
+            "hazard_target_speed": (
+                self.hazard_injector.hazard_target_speed
+                if self.hazard_injector is not None else None
+            ),
+            "hazard_resolved": (
+                self.hazard_injector.hazard_resolved
+                if self.hazard_injector is not None else False
+            ),
             "mesh_received_source_ids": mesh_received_source_ids,
             "mesh_any_braking_peer_received": any_braking_peer_received,
             "braking_received_decay": self._braking_received_decay,
