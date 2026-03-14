@@ -25,6 +25,23 @@ class HazardInjector:
     BRAKING_DURATION_MIN = 0.5  # seconds
     BRAKING_DURATION_MAX = 1.5  # seconds
 
+    # Run 021: domain-randomize braking intensity to cover the real-data
+    # distribution (mostly -2.5 to -5.0 m/s²).  Desired decel is drawn
+    # uniformly and converted to a target speed based on the target's
+    # current speed at injection time.  HAZARD_DECEL_MIN=3.0 stays well
+    # above normal CF adjustments (-0.3 to -0.5), so the critic can still
+    # distinguish hazard from calm episodes.
+    HAZARD_DECEL_MIN = 3.0   # m/s² — moderate braking
+    HAZARD_DECEL_MAX = 10.0  # m/s² — emergency (clamped by SUMO physics)
+
+    # Run 021: resolved-hazard episodes.  Some fraction of hazards clear
+    # after a short delay — the target resumes normal driving under CF.
+    # Teaches the policy to react to transient braking (real-world pattern)
+    # and to release the brake when the scene normalizes.
+    HAZARD_RESOLVE_PROB = 0.4       # 40% of hazards resolve
+    RESOLVE_DELAY_MIN = 20          # steps after slowdown ends (2.0s)
+    RESOLVE_DELAY_MAX = 50          # steps after slowdown ends (5.0s)
+
     EMERGENCY_BRAKE = "emergency_brake"
     EGO_VEHICLE_ID = "V001"
     TARGET_STRATEGY_NEAREST = "nearest"
@@ -117,6 +134,11 @@ class HazardInjector:
         self._hazard_injection_failed_reason: Optional[str] = None
         self._braking_duration: Optional[float] = None
         self._slowdown_end_step: Optional[int] = None
+        self._hazard_target_speed: Optional[float] = None
+        self._desired_decel: Optional[float] = None
+        self._should_resolve: bool = False
+        self._resolve_step: Optional[int] = None
+        self._hazard_resolved: bool = False
 
     def reset(self, options: Optional[Dict[str, Any]] = None) -> None:
         self._reset_state(options=options)
@@ -210,8 +232,19 @@ class HazardInjector:
         braking_duration = self._rng.uniform(
             self.BRAKING_DURATION_MIN, self.BRAKING_DURATION_MAX
         )
-        sumo.slow_down(target, 0.0, braking_duration)
+
+        # Run 021: randomize desired deceleration and compute target speed
+        # from the target's current speed at injection time.
+        desired_decel = self._rng.uniform(
+            self.HAZARD_DECEL_MIN, self.HAZARD_DECEL_MAX
+        )
+        target_state = sumo.get_vehicle_state(target)
+        target_speed = max(0.0, target_state.speed - desired_decel * braking_duration)
+        sumo.slow_down(target, target_speed, braking_duration)
+
         self._braking_duration = braking_duration
+        self._desired_decel = desired_decel
+        self._hazard_target_speed = target_speed
         self._slowdown_end_step = step + int(
             round(braking_duration / self.STEP_LENGTH)
         )
@@ -219,24 +252,49 @@ class HazardInjector:
         self._hazard_target = target
         self._hazard_source_rank_ahead = source_rank_ahead
 
+        # Run 021: decide whether this hazard resolves (target resumes CF).
+        self._should_resolve = self._rng.random() < self.HAZARD_RESOLVE_PROB
+        if self._should_resolve:
+            resolve_delay = self._rng.randint(
+                self.RESOLVE_DELAY_MIN, self.RESOLVE_DELAY_MAX
+            )
+            self._resolve_step = self._slowdown_end_step + resolve_delay
+        else:
+            self._resolve_step = None
+
         return True
 
     def maintain_hazard(self, step: int, sumo: "SUMOConnection") -> None:
-        """Pin hazard target at speed 0 once the gradual slowdown completes.
+        """Manage hazard target after initial slowdown.
 
-        Must be called every step from the environment. After the slowDown
-        duration expires, SUMO would return the vehicle to CF control and
-        it would accelerate again. This pins speed=0 to keep the hazard
-        active for the rest of the episode (same reward dynamics as before).
+        Must be called every step from the environment.
+
+        Phase 1 — pin: Once the slowDown duration expires, SUMO would
+        return the vehicle to CF control.  Pin the target at the chosen
+        hazard target speed to keep the obstruction active.
+
+        Phase 2 — resolve (Run 021): For resolved-hazard episodes, release
+        the target back to CF after a short delay so it resumes normal
+        driving.  This teaches the policy to react to transient braking.
         """
-        if (
-            self._hazard_injected
-            and self._hazard_target is not None
-            and self._slowdown_end_step is not None
-            and step >= self._slowdown_end_step
-        ):
-            sumo.set_vehicle_speed(self._hazard_target, 0.0)
+        if not self._hazard_injected or self._hazard_target is None:
+            return
+
+        # Phase 1: pin at target speed once slowdown completes
+        if self._slowdown_end_step is not None and step >= self._slowdown_end_step:
+            target_speed = self._hazard_target_speed if self._hazard_target_speed is not None else 0.0
+            sumo.set_vehicle_speed(self._hazard_target, target_speed)
             self._slowdown_end_step = None  # Only pin once
+
+        # Phase 2: release to CF for resolved hazards
+        if (
+            self._should_resolve
+            and self._resolve_step is not None
+            and step >= self._resolve_step
+        ):
+            sumo.release_vehicle_speed(self._hazard_target)
+            self._should_resolve = False  # Only release once
+            self._hazard_resolved = True
 
     def is_in_hazard_window(self, step: int) -> bool:
         return self.HAZARD_WINDOW_START <= step <= self.HAZARD_WINDOW_END
@@ -272,6 +330,18 @@ class HazardInjector:
     @property
     def braking_duration(self) -> Optional[float]:
         return self._braking_duration
+
+    @property
+    def desired_decel(self) -> Optional[float]:
+        return self._desired_decel
+
+    @property
+    def hazard_target_speed(self) -> Optional[float]:
+        return self._hazard_target_speed
+
+    @property
+    def hazard_resolved(self) -> bool:
+        return self._hazard_resolved
 
     @property
     def target_strategy(self) -> str:

@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 020 - Diagnostic Retrain (2M steps)
+# RoadSense Training Run 021 - Hazard Distribution Fix (2M diagnostic)
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,47 +10,49 @@
 #   TOTAL_STEPS   - Training timesteps (default: 2000000 for diagnostic run)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 020 — Deployment-compatible observation retrain.
+# Run 021 — Domain-randomized hazard intensity + resolved-hazard episodes.
 #
-#   Why Run 020 exists:
-#     - Run 019 was the best SUMO model (100% V2V reaction, 0% collisions)
-#       but was NOT deployable on real data.
-#     - Root cause: deployment-incompatible observation semantics
-#       * sticky braking_received latch
-#       * progress feature with no deployment meaning
-#     - Run 020 replaces that with a deployment-compatible observation:
-#       * ego[5] = post-cone exponential-decay braking_received
-#       * progress removed
-#       * reward terms scaled by the same decay signal (obs/reward aligned)
+#   Why Run 021 exists:
+#     - Run 020 fixed the deployment-incompatible observation (decay replaces
+#       sticky latch, progress removed), and achieved 100% SUMO reaction.
+#     - But real-data replay FAILED: 12% sensitivity on Recording #2,
+#       17% sensitivity on Extra Driving (targets: >60% / >75%).
+#     - Root cause: hazard-distribution mismatch between sim and real.
+#       * Training: peer always brakes at -9.3 to -10.0 m/s² (extreme)
+#       * Real data: 80%+ of braking events are -2.5 to -5.0 m/s² (moderate)
+#       * Model never saw moderate braking → decision boundary too extreme
+#       * Training hazards pin target at 0 forever → real braking is transient
 #
-#   Code status before launch:
-#     - Local unit suite passed after final post-cone update
-#     - Docker integration suite passed after final post-cone update
+#   Run 021 changes (hazard_injector.py only):
+#     1. Domain-randomize desired deceleration: uniform [3.0, 10.0] m/s²
+#        Computed target speed = max(0, current_speed - decel × duration)
+#     2. 40% of hazards resolve: target releases to CF after 2-5s delay
+#        Teaches model to react to transient braking (real-world pattern)
 #
-#   Load-bearing fixes preserved from Runs 018/019:
-#     - Faster slowDown: BRAKING_DURATION 0.5-1.5s (signal strength fix)
-#     - VecNormalize(norm_obs=False, norm_reward=True) (reward normalization)
-#     - Warmup contamination fix
-#     - CF override
-#     - HAZARD_PROBABILITY=1.0
-#     - Deep Sets, features_dim=38 (32 embed + 6 ego)
+#   Everything else unchanged from Run 020:
+#     - Observation: 6-dim ego with decay braking_received (deployment-compatible)
+#     - Reward: decay-scaled penalty/bonus (obs/reward aligned)
+#     - Architecture: Deep Sets, features_dim=38 (32 embed + 6 ego)
 #     - Hyperparams: LR=1e-4, n_steps=4096, ent_coef=0.0, log_std_init=-0.5
-#     - Dataset generation from base_real, seed=42, 25 train + 40 eval
+#     - VecNormalize(norm_obs=False, norm_reward=True)
+#     - Warmup contamination fix, CF override, HAZARD_PROBABILITY=1.0
+#     - BRAKING_DURATION 0.5-1.5s (unchanged — keeps signal sharp)
+#     - Dataset: base_real, seed=42, 25 train + 40 eval
 #
-#   This is a 2M DIAGNOSTIC run, not the 10M production run.
-#   Kill criteria from Run 020 plan:
-#     - explained_variance must exceed 0.1 by 500k
-#     - if explained_variance stays ~0 at 500k -> KILL and diagnose
-#     - V2V reaction at 2M checkpoint must exceed 50%
+#   This is a 2M DIAGNOSTIC run.  Kill criteria:
+#     - explained_variance must exceed 0.1 by 500k steps
+#     - V2V reaction at 2M must exceed 50%
 #
-#   If this run passes:
-#     - promote same config to a 10M production run
-#     - then rerun real-data validation
+#   Acceptance gates (MANDATORY before 10M promotion):
+#     - SUMO eval: >90% V2V reaction, 0% collisions
+#     - Real-data replay (Recording #2): sensitivity >60%, FP <15%
+#     - Real-data replay (Extra Driving): sensitivity >75%, FP <20%
+#     - Replay validation runs LOCALLY after downloading model from S3
 # =============================================================================
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_020"
+RUN_ID="cloud_prod_021"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=2000000
 S3_BUCKET="saferide-training-results"
@@ -59,7 +61,7 @@ S3_BUCKET="saferide-training-results"
 export AWS_DEFAULT_REGION=il-central-1
 export AWS_REGION="$AWS_DEFAULT_REGION"
 WORK_DIR="/home/ubuntu/work"
-DATASET_DIR="ml/scenarios/datasets/dataset_v10_run020_post_cone"
+DATASET_DIR="ml/scenarios/datasets/dataset_v11_run021"
 EMULATOR_PARAMS="ml/espnow_emulator/emulator_params_measured.json"
 
 # -------------------------------------------------------------------
@@ -114,8 +116,8 @@ echo "[2/7] Rebuilding Docker image (cached - should be fast)..."
 cd "$WORK_DIR/ml"
 docker build -t roadsense-ml:latest .
 
-# 3. Generate Run 020 dataset from base_real (same canonical params)
-echo "[3/7] Generating Run 020 dataset from base_real..."
+# 3. Generate dataset from base_real (same canonical params as every run)
+echo "[3/7] Generating dataset from base_real..."
 cd "$WORK_DIR"
 ./ml/run_docker.sh generate \
     --base_dir ml/scenarios/base_real \

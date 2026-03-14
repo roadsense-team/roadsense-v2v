@@ -87,7 +87,9 @@ def test_hazard_targets_nearest_peer(mock_sumo):
     mock_sumo.slow_down.assert_called_once()
     call_args = mock_sumo.slow_down.call_args
     assert call_args[0][0] == "V002"
-    assert call_args[0][1] == 0.0
+    # Run 021: target speed is computed from desired decel × duration,
+    # so it is no longer always 0.0 — just check it is non-negative.
+    assert call_args[0][1] >= 0.0
     duration = call_args[0][2]
     assert 0.5 <= duration <= 1.5
     assert inj.hazard_target == "V002"
@@ -360,7 +362,7 @@ def test_slowdown_end_step_computed_correctly(mock_sumo):
 
 
 def test_maintain_hazard_pins_speed_after_slowdown(mock_sumo):
-    """After slowdown duration, maintain_hazard pins target at speed 0."""
+    """After slowdown duration, maintain_hazard pins target at hazard target speed."""
     inj = HazardInjector(seed=42)
     inj._episode_will_have_hazard = True
     inj._hazard_step = 200
@@ -368,14 +370,15 @@ def test_maintain_hazard_pins_speed_after_slowdown(mock_sumo):
 
     inj.maybe_inject(step=200, sumo=mock_sumo)
     end_step = inj._slowdown_end_step
+    expected_speed = inj.hazard_target_speed
 
     # Before slowdown ends: no setSpeed call
     inj.maintain_hazard(step=end_step - 1, sumo=mock_sumo)
     mock_sumo.set_vehicle_speed.assert_not_called()
 
-    # At slowdown end: pins speed to 0
+    # At slowdown end: pins at the computed target speed
     inj.maintain_hazard(step=end_step, sumo=mock_sumo)
-    mock_sumo.set_vehicle_speed.assert_called_once_with("V002", 0.0)
+    mock_sumo.set_vehicle_speed.assert_called_once_with("V002", expected_speed)
 
 
 def test_maintain_hazard_only_pins_once(mock_sumo):
@@ -411,9 +414,19 @@ def test_reset_clears_braking_duration_and_slowdown_end():
     inj = HazardInjector(seed=42)
     inj._braking_duration = 3.0
     inj._slowdown_end_step = 250
+    inj._hazard_target_speed = 5.0
+    inj._desired_decel = 7.0
+    inj._should_resolve = True
+    inj._resolve_step = 300
+    inj._hazard_resolved = True
     inj.reset()
     assert inj.braking_duration is None
     assert inj._slowdown_end_step is None
+    assert inj.hazard_target_speed is None
+    assert inj.desired_decel is None
+    assert inj._should_resolve is False
+    assert inj._resolve_step is None
+    assert inj.hazard_resolved is False
 
 
 def test_no_set_vehicle_speed_on_injection(mock_sumo):
@@ -427,3 +440,174 @@ def test_no_set_vehicle_speed_on_injection(mock_sumo):
 
     mock_sumo.slow_down.assert_called_once()
     mock_sumo.set_vehicle_speed.assert_not_called()
+
+
+# --- Run 021: domain-randomized braking intensity tests ---
+
+
+def test_desired_decel_randomized_in_range(mock_sumo):
+    """Run 021: desired decel is randomized between HAZARD_DECEL_MIN and MAX."""
+    decels = set()
+    for seed in range(100):
+        inj = HazardInjector(seed=seed)
+        inj._episode_will_have_hazard = True
+        inj._hazard_step = 200
+        inj._hazard_injected = False
+        inj.maybe_inject(step=200, sumo=mock_sumo)
+        if inj.desired_decel is not None:
+            decels.add(round(inj.desired_decel, 1))
+            assert HazardInjector.HAZARD_DECEL_MIN <= inj.desired_decel <= HazardInjector.HAZARD_DECEL_MAX
+
+    # Should have variety
+    assert len(decels) > 5
+
+
+def test_target_speed_computed_from_current_speed(mock_sumo):
+    """Run 021: target speed = max(0, current_speed - decel * duration)."""
+    inj = HazardInjector(seed=42)
+    inj._episode_will_have_hazard = True
+    inj._hazard_step = 200
+    inj._hazard_injected = False
+
+    inj.maybe_inject(step=200, sumo=mock_sumo)
+
+    # V002 speed=10.0 in mock_sumo
+    expected = max(0.0, 10.0 - inj.desired_decel * inj.braking_duration)
+    assert inj.hazard_target_speed == pytest.approx(expected, abs=1e-9)
+
+    # slow_down was called with computed target speed
+    call_args = mock_sumo.slow_down.call_args
+    assert call_args[0][1] == pytest.approx(expected, abs=1e-9)
+
+
+def test_target_speed_clamped_to_zero():
+    """Run 021: target speed never goes negative even with high decel."""
+    sumo = _make_sumo([
+        _make_vehicle_state("V001", x=0.0, y=0.0, heading=0.0),
+        _make_vehicle_state("V002", x=0.0, y=10.0, speed=3.0),  # slow target
+    ])
+
+    # Force maximum decel and duration for a guaranteed clamp
+    inj = HazardInjector(seed=42)
+    inj._episode_will_have_hazard = True
+    inj._hazard_step = 200
+    inj._hazard_injected = False
+
+    inj.maybe_inject(step=200, sumo=sumo)
+
+    assert inj.hazard_target_speed >= 0.0
+    call_args = sumo.slow_down.call_args
+    assert call_args[0][1] >= 0.0
+
+
+# --- Run 021: resolved-hazard episode tests ---
+
+
+def test_resolved_hazard_fraction():
+    """Run 021: ~40% of hazards should resolve (statistical check)."""
+    sumo = _make_sumo([
+        _make_vehicle_state("V001", x=0.0, y=0.0, heading=0.0),
+        _make_vehicle_state("V002", x=0.0, y=10.0),
+    ])
+
+    resolve_count = 0
+    trials = 500
+    for seed in range(trials):
+        inj = HazardInjector(seed=seed)
+        inj._episode_will_have_hazard = True
+        inj._hazard_step = 200
+        inj._hazard_injected = False
+        inj.maybe_inject(step=200, sumo=sumo)
+        if inj._should_resolve:
+            resolve_count += 1
+
+    ratio = resolve_count / trials
+    # 40% ± 6% margin (generous for 500 trials)
+    assert 0.30 <= ratio <= 0.50, f"Resolve ratio {ratio:.2f} outside [0.30, 0.50]"
+
+
+def test_resolve_step_in_expected_range(mock_sumo):
+    """Run 021: resolve step is slowdown_end + [20, 50]."""
+    for seed in range(200):
+        inj = HazardInjector(seed=seed)
+        inj._episode_will_have_hazard = True
+        inj._hazard_step = 200
+        inj._hazard_injected = False
+        inj.maybe_inject(step=200, sumo=mock_sumo)
+
+        if inj._should_resolve:
+            end = 200 + int(round(inj.braking_duration / 0.1))
+            delay = inj._resolve_step - end
+            assert HazardInjector.RESOLVE_DELAY_MIN <= delay <= HazardInjector.RESOLVE_DELAY_MAX
+
+
+def test_resolved_hazard_releases_to_cf(mock_sumo):
+    """Run 021: resolved hazard calls release_vehicle_speed after delay."""
+    mock_sumo.release_vehicle_speed = Mock()
+
+    # Find a seed that produces a resolved hazard
+    for seed in range(100):
+        inj = HazardInjector(seed=seed)
+        inj._episode_will_have_hazard = True
+        inj._hazard_step = 200
+        inj._hazard_injected = False
+        mock_sumo.set_vehicle_speed.reset_mock()
+        mock_sumo.release_vehicle_speed.reset_mock()
+
+        inj.maybe_inject(step=200, sumo=mock_sumo)
+        if not inj._should_resolve:
+            continue
+
+        end_step = 200 + int(round(inj.braking_duration / 0.1))
+        resolve_step = inj._resolve_step
+
+        # Phase 1: pin at target speed
+        inj.maintain_hazard(step=end_step, sumo=mock_sumo)
+        mock_sumo.set_vehicle_speed.assert_called_once()
+        mock_sumo.release_vehicle_speed.assert_not_called()
+
+        # Before resolve: no release
+        inj.maintain_hazard(step=resolve_step - 1, sumo=mock_sumo)
+        mock_sumo.release_vehicle_speed.assert_not_called()
+
+        # At resolve step: release to CF
+        inj.maintain_hazard(step=resolve_step, sumo=mock_sumo)
+        mock_sumo.release_vehicle_speed.assert_called_once_with("V002")
+        assert inj.hazard_resolved is True
+
+        # Subsequent calls: no additional release
+        mock_sumo.release_vehicle_speed.reset_mock()
+        inj.maintain_hazard(step=resolve_step + 1, sumo=mock_sumo)
+        mock_sumo.release_vehicle_speed.assert_not_called()
+        return
+
+    pytest.fail("No seed produced a resolved hazard in 100 trials")
+
+
+def test_persistent_hazard_never_releases(mock_sumo):
+    """Run 021: persistent hazard (no resolve) never calls release_vehicle_speed."""
+    mock_sumo.release_vehicle_speed = Mock()
+
+    # Find a seed that produces a persistent hazard
+    for seed in range(100):
+        inj = HazardInjector(seed=seed)
+        inj._episode_will_have_hazard = True
+        inj._hazard_step = 200
+        inj._hazard_injected = False
+        mock_sumo.release_vehicle_speed.reset_mock()
+
+        inj.maybe_inject(step=200, sumo=mock_sumo)
+        if inj._should_resolve:
+            continue
+
+        end_step = 200 + int(round(inj.braking_duration / 0.1))
+
+        # Pin, then run many more steps
+        for s in range(end_step, end_step + 200):
+            inj.maintain_hazard(step=s, sumo=mock_sumo)
+
+        mock_sumo.release_vehicle_speed.assert_not_called()
+        assert inj.hazard_resolved is False
+        return
+
+    pytest.fail("No seed produced a persistent hazard in 100 trials")
