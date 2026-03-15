@@ -15,7 +15,7 @@ class ObservationBuilder:
     Builds observation dict for variable-n peer environments.
 
     Keys:
-        - ego: [speed/30, accel/10, heading/pi, peer_count/8, min_peer_accel/10, braking_received_decay]
+        - ego: [speed/30, accel/10, peer_count/8, min_peer_accel/10, braking_received_decay]
         - peers: (MAX_PEERS, 6) peer features
         - peer_mask: (MAX_PEERS,) 1.0 for valid peers, 0.0 for padding
     """
@@ -138,7 +138,6 @@ class ObservationBuilder:
             [
                 ego_state.speed / self.MAX_SPEED,
                 ego_state.acceleration / self.MAX_ACCEL,
-                ((ego_heading_deg + 180.0) % 360.0 - 180.0) / 180.0,
                 valid_count / self.MAX_PEERS,
                 min_peer_accel / self.MAX_ACCEL,
                 float(braking_received),

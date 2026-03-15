@@ -140,7 +140,7 @@ class RewardCalculator:
         """Calculate total reward for current step.
 
         braking_received: exponential-decay signal in [0, 1] — same value
-            that drives ego[5].  Reward terms are scaled by this value so
+            that drives ego[4].  Reward terms are scaled by this value so
             the shaping fades smoothly with the observation signal.
         ego_speed: current ego speed in m/s.  Used to suppress the ignoring
             penalty when ego is already stopped.

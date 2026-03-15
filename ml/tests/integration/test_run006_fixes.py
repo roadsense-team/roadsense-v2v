@@ -162,12 +162,12 @@ def test_braking_peer_in_observation(make_env):
             )
 
             # After hazard injection, check for braking signal
-            if step > 162 and obs["ego"][4] < -0.03:
+            if step > 162 and obs["ego"][3] < -0.03:
                 found_braking_signal = True
-                # Decay braking_received (ego[5]) must be elevated
-                assert obs["ego"][5] > 0.5, (
-                    f"braking_received_decay too low ({obs['ego'][5]}) "
-                    f"when min_peer_accel={obs['ego'][4]}"
+                # Decay braking_received (ego[4]) must be elevated
+                assert obs["ego"][4] > 0.5, (
+                    f"braking_received_decay too low ({obs['ego'][4]}) "
+                    f"when min_peer_accel={obs['ego'][3]}"
                 )
                 break
 
@@ -361,7 +361,7 @@ def test_emulator_resets_per_episode(make_env):
     # The key check: observation is valid and finite
     assert np.isfinite(obs["ego"]).all()
     assert np.isfinite(obs["peers"]).all()
-    assert obs["ego"].shape == (6,)
+    assert obs["ego"].shape == (5,)
 
 
 # --- Smoke training test ---

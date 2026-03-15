@@ -20,7 +20,7 @@ Usage:
     #   --braking_received_mode decay     # default — exponential decay (0.95/step)
     #   --braking_received_mode latched   # legacy sticky latch (regression analysis)
     #   --braking_received_mode instant   # per-step only, no memory
-    #   --braking_received_mode off       # force ego[5] = 0 throughout replay
+    #   --braking_received_mode off       # force ego[4] = 0 throughout replay
 """
 
 import argparse
@@ -55,6 +55,14 @@ V2V_BRAKING_ACCEL_THRESHOLD = -2.5  # matches ConvoyEnv.BRAKING_ACCEL_THRESHOLD
 BRAKING_DECAY = 0.95  # matches ConvoyEnv.BRAKING_DECAY
 MODEL_ACTION_THRESHOLD = 0.1  # model action above this = model brakes
 MAX_DECEL = 8.0  # m/s², matches training
+
+# Current ego observation layout (Run 022+):
+# [speed/30, accel/10, peer_count/8, min_peer_accel/10, braking_received]
+EGO_SPEED_IDX = 0
+EGO_ACCEL_IDX = 1
+EGO_PEER_COUNT_IDX = 2
+EGO_MIN_PEER_ACCEL_IDX = 3
+EGO_BRAKING_RECEIVED_IDX = 4
 
 
 @dataclass
@@ -347,8 +355,8 @@ def run_replay(
 
         # Count visible peers from observation
         visible_peers = int(np.sum(observation["peer_mask"]))
-        min_pa = float(observation["ego"][4]) * obs_builder.MAX_ACCEL
-        braking_received_obs = float(observation["ego"][5])
+        min_pa = float(observation["ego"][EGO_MIN_PEER_ACCEL_IDX]) * obs_builder.MAX_ACCEL
+        braking_received_obs = float(observation["ego"][EGO_BRAKING_RECEIVED_IDX])
 
         results["timestamps_ms"].append(step_t)
         results["ego_speed"].append(float(ego_row.speed))
@@ -561,7 +569,7 @@ def main():
         "--braking_received_mode",
         choices=["decay", "latched", "instant", "off"],
         default="decay",
-        help="How to synthesize replay-side braking_received (ego[5]). "
+        help="How to synthesize replay-side braking_received (ego[4]). "
              "'decay' (default) matches Run 020 training: exponential decay "
              "with factor 0.95/step. 'latched'/'instant'/'off' kept for "
              "regression analysis against earlier runs.",

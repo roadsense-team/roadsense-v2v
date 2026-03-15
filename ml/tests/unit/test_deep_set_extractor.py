@@ -17,7 +17,7 @@ def _make_observation_space() -> gym.spaces.Dict:
             "ego": gym.spaces.Box(
                 low=-1.0,
                 high=1.0,
-                shape=(6,),
+                shape=(5,),
                 dtype=np.float32,
             ),
             "peers": gym.spaces.Box(
@@ -39,7 +39,7 @@ def _make_observation_space() -> gym.spaces.Dict:
 def _make_batch(peer_mask: torch.Tensor, seed: int = 0) -> Dict[str, torch.Tensor]:
     batch_size = peer_mask.shape[0]
     torch.manual_seed(seed)
-    ego = torch.randn((batch_size, 6))
+    ego = torch.randn((batch_size, 5))
     peers = torch.randn((batch_size, 8, 6))
     return {"ego": ego, "peers": peers, "peer_mask": peer_mask}
 
@@ -70,7 +70,7 @@ class _DummyConvoyEnv(gym.Env):
 
     def _sample_obs(self):
         return {
-            "ego": np.zeros((6,), dtype=np.float32),
+            "ego": np.zeros((5,), dtype=np.float32),
             "peers": np.zeros((8, 6), dtype=np.float32),
             "peer_mask": np.zeros((8,), dtype=np.float32),
         }
@@ -92,7 +92,7 @@ def test_extractor_output_shape():
 
     features = extractor(observations)
 
-    assert features.shape == (3, 38)
+    assert features.shape == (3, 37)
 
 
 def test_extractor_handles_zero_peers():
@@ -118,7 +118,7 @@ def test_extractor_handles_max_peers():
 
     features = extractor(observations)
 
-    assert features.shape == (4, 38)
+    assert features.shape == (4, 37)
 
 
 def test_extractor_permutation_invariant():
@@ -126,7 +126,7 @@ def test_extractor_permutation_invariant():
     extractor = DeepSetExtractor(observation_space)
 
     torch.manual_seed(123)
-    ego = torch.randn((1, 6))
+    ego = torch.randn((1, 5))
     peers = torch.randn((1, 8, 6))
     peer_mask = torch.tensor(
         [[1, 1, 1, 1, 0, 0, 0, 0]],
@@ -147,11 +147,11 @@ def test_extractor_permutation_invariant():
     assert torch.allclose(features_a, features_b, atol=1e-6)
 
 
-def test_extractor_features_dim_is_38():
+def test_extractor_features_dim_is_37():
     observation_space = _make_observation_space()
     extractor = DeepSetExtractor(observation_space)
 
-    assert extractor.features_dim == 38
+    assert extractor.features_dim == 37
 
 
 def test_extractor_works_with_sb3_ppo():
