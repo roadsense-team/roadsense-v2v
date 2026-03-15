@@ -2,6 +2,7 @@
 Unit tests for sim-to-real replay helpers (Run 020 — decay-based braking signal).
 """
 
+import numpy as np
 import pytest
 
 from ml.scripts import validate_against_real_data
@@ -98,3 +99,51 @@ def test_unknown_mode_raises():
             current_decay=0.0,
             mode="bad-mode",
         )
+
+
+class _FakeModel:
+    def predict(self, observation, deterministic=True):
+        return np.array([0.0], dtype=np.float32), None
+
+
+def test_run_replay_extracts_current_ego_indices(tmp_path):
+    tx_rows = [
+        validate_against_real_data.SensorRow(
+            timestamp_local_ms=0,
+            msg_timestamp=0,
+            vehicle_id="V001",
+            lat=0.0,
+            lon=0.0,
+            speed=10.0,
+            heading=0.0,
+            accel_fwd=0.0,
+            hop_count=0,
+        )
+    ]
+    rx_rows = [
+        validate_against_real_data.SensorRow(
+            timestamp_local_ms=0,
+            msg_timestamp=0,
+            vehicle_id="V002",
+            lat=0.0001,  # ~11.1m north of ego, inside the forward cone
+            lon=0.0,
+            speed=8.0,
+            heading=0.0,
+            accel_fwd=-4.0,
+            hop_count=0,
+        )
+    ]
+
+    validate_against_real_data.run_replay(
+        tx_rows=tx_rows,
+        rx_rows=rx_rows,
+        model=_FakeModel(),
+        output_dir=tmp_path,
+        recording_name="unit",
+        braking_received_mode="decay",
+    )
+
+    timeseries = np.load(tmp_path / "timeseries_unit.npz")
+    assert timeseries["peer_count"].tolist() == [1]
+    assert timeseries["min_peer_accel"].tolist() == pytest.approx([-4.0])
+    assert timeseries["braking_received"].tolist() == pytest.approx([1.0])

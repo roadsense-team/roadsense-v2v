@@ -50,7 +50,7 @@ def test_build_observation_returns_dict_shapes():
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
     assert isinstance(result, dict)
-    assert result["ego"].shape == (6,)
+    assert result["ego"].shape == (5,)
     assert result["peers"].shape == (builder.MAX_PEERS, 6)
     assert result["peer_mask"].shape == (builder.MAX_PEERS,)
 
@@ -119,8 +119,8 @@ def test_build_observation_zero_peers_is_well_formed():
     assert result["peer_mask"].sum() == pytest.approx(0.0)
     assert np.all(result["peers"] == 0.0)
     assert np.isfinite(result["ego"]).all()
-    assert result["ego"][3] == pytest.approx(0.0)  # peer_count/MAX_PEERS = 0
-    assert result["ego"][4] == pytest.approx(0.0)  # min_peer_accel = 0 when no peers
+    assert result["ego"][2] == pytest.approx(0.0)  # peer_count/MAX_PEERS = 0
+    assert result["ego"][3] == pytest.approx(0.0)  # min_peer_accel = 0 when no peers
 
 
 def test_build_observation_peers_behind_ego_filtered_by_cone():
@@ -179,7 +179,7 @@ def test_build_observation_min_peer_accel_reflects_braking():
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
     # min_peer_accel = -7.0, normalized by MAX_ACCEL=10 -> -0.7
-    assert result["ego"][4] == pytest.approx(-0.7)
+    assert result["ego"][3] == pytest.approx(-0.7)
 
 
 def test_build_observation_min_peer_accel_ignores_behind():
@@ -195,7 +195,7 @@ def test_build_observation_min_peer_accel_ignores_behind():
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
     # Behind peer filtered by cone, only ahead peer counted
-    assert result["ego"][4] == pytest.approx(-0.1)
+    assert result["ego"][3] == pytest.approx(-0.1)
 
 
 def test_build_observation_all_stale_peers_excluded():
@@ -211,15 +211,15 @@ def test_build_observation_all_stale_peers_excluded():
 
 
 def test_build_observation_braking_received_decay():
-    """ego[5] reflects the braking_received decay value."""
+    """ego[4] reflects the braking_received decay value."""
     builder = ObservationBuilder()
     ego_state = _make_ego_state()
 
     result = builder.build(ego_state, [], (ego_state.x, ego_state.y), braking_received=0.75)
-    assert result["ego"][5] == pytest.approx(0.75)
+    assert result["ego"][4] == pytest.approx(0.75)
 
     result_zero = builder.build(ego_state, [], (ego_state.x, ego_state.y), braking_received=0.0)
-    assert result_zero["ego"][5] == pytest.approx(0.0)
+    assert result_zero["ego"][4] == pytest.approx(0.0)
 
     result_one = builder.build(ego_state, [], (ego_state.x, ego_state.y), braking_received=1.0)
-    assert result_one["ego"][5] == pytest.approx(1.0)
+    assert result_one["ego"][4] == pytest.approx(1.0)

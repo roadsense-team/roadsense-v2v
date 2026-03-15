@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 021 - Hazard Distribution Fix (2M diagnostic)
+# RoadSense Training Run 022 - Remove Ego Heading (2M diagnostic)
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
@@ -10,33 +10,34 @@
 #   TOTAL_STEPS   - Training timesteps (default: 2000000 for diagnostic run)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 021 — Domain-randomized hazard intensity + resolved-hazard episodes.
+# Run 022 — Remove ego heading from observation to fix sim-to-real overfitting.
 #
-#   Why Run 021 exists:
-#     - Run 020 fixed the deployment-incompatible observation (decay replaces
-#       sticky latch, progress removed), and achieved 100% SUMO reaction.
-#     - But real-data replay FAILED: 12% sensitivity on Recording #2,
-#       17% sensitivity on Extra Driving (targets: >60% / >75%).
-#     - Root cause: hazard-distribution mismatch between sim and real.
-#       * Training: peer always brakes at -9.3 to -10.0 m/s² (extreme)
-#       * Real data: 80%+ of braking events are -2.5 to -5.0 m/s² (moderate)
-#       * Model never saw moderate braking → decision boundary too extreme
-#       * Training hazards pin target at 0 forever → real braking is transient
+#   Why Run 022 exists:
+#     - Run 021 improved sensitivity (12%→40% Rec#2, 17%→91% Extra) but
+#       introduced catastrophic false positives (93.8% FP on Extra Driving).
+#     - Root cause: ego heading (ego[2]) is a spurious feature. The model
+#       learned heading as a route-position proxy — heading < 0 → brake,
+#       heading > 0.5 → calm. On different routes, this correlation breaks.
+#     - Evidence: model probing shows heading alone produces action 0→1.0
+#       swing. Extra Driving heading mean=-0.33 (model's "brake zone"),
+#       Recording #2 heading mean=+0.78 (model's "calm zone").
+#     - Ego absolute heading has ZERO causal relevance to V2V hazard detection.
+#       Relative heading (peer-ego) is already in peer observations.
 #
-#   Run 021 changes (hazard_injector.py only):
-#     1. Domain-randomize desired deceleration: uniform [3.0, 10.0] m/s²
-#        Computed target speed = max(0, current_speed - decel × duration)
-#     2. 40% of hazards resolve: target releases to CF after 2-5s delay
-#        Teaches model to react to transient braking (real-world pattern)
+#   Run 022 changes:
+#     1. Remove ego heading from observation (ego 6-dim → 5-dim)
+#        New ego: [speed/30, accel/10, peer_count/8, min_peer_accel/10, braking_received]
+#     2. Deep Sets features_dim: 38 → 37 (32 embed + 5 ego)
 #
-#   Everything else unchanged from Run 020:
-#     - Observation: 6-dim ego with decay braking_received (deployment-compatible)
+#   Everything else unchanged from Run 021:
+#     - Hazard decel randomization: uniform [3.0, 10.0] m/s²
+#     - Resolved-hazard episodes: 40% resolve after 2-5s
 #     - Reward: decay-scaled penalty/bonus (obs/reward aligned)
-#     - Architecture: Deep Sets, features_dim=38 (32 embed + 6 ego)
+#     - Architecture: Deep Sets, features_dim=37 (32 embed + 5 ego)
 #     - Hyperparams: LR=1e-4, n_steps=4096, ent_coef=0.0, log_std_init=-0.5
 #     - VecNormalize(norm_obs=False, norm_reward=True)
 #     - Warmup contamination fix, CF override, HAZARD_PROBABILITY=1.0
-#     - BRAKING_DURATION 0.5-1.5s (unchanged — keeps signal sharp)
+#     - BRAKING_DURATION 0.5-1.5s (keeps signal sharp)
 #     - Dataset: base_real, seed=42, 25 train + 40 eval
 #
 #   This is a 2M DIAGNOSTIC run.  Kill criteria:
@@ -52,7 +53,7 @@
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_021"
+RUN_ID="cloud_prod_022"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=2000000
 S3_BUCKET="saferide-training-results"
@@ -61,7 +62,7 @@ S3_BUCKET="saferide-training-results"
 export AWS_DEFAULT_REGION=il-central-1
 export AWS_REGION="$AWS_DEFAULT_REGION"
 WORK_DIR="/home/ubuntu/work"
-DATASET_DIR="ml/scenarios/datasets/dataset_v11_run021"
+DATASET_DIR="ml/scenarios/datasets/dataset_v12_run022"
 EMULATOR_PARAMS="ml/espnow_emulator/emulator_params_measured.json"
 
 # -------------------------------------------------------------------

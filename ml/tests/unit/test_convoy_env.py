@@ -500,7 +500,7 @@ def test_reset_does_not_carry_warmup_braking_into_episode(
     obs, _ = env_with_mocks.reset()
 
     assert env_with_mocks._braking_received_decay == pytest.approx(0.0)
-    assert obs["ego"][5] == pytest.approx(0.0)
+    assert obs["ego"][4] == pytest.approx(0.0)
 
 
 def test_step_accepts_float_action(env_with_mocks):
@@ -516,7 +516,7 @@ def test_reset_observation_shape_is_dict(env_with_mocks):
     obs, _ = env_with_mocks.reset()
 
     assert set(obs.keys()) == {"ego", "peers", "peer_mask"}
-    assert obs["ego"].shape == (6,)
+    assert obs["ego"].shape == (5,)
     assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
     assert obs["peer_mask"].shape == (ObservationBuilder.MAX_PEERS,)
     assert obs["ego"].dtype == np.float32
@@ -787,7 +787,7 @@ def test_ego_exit_sets_truncated_true(env_with_mocks, mock_sumo):
     assert truncated is True
     assert terminated is False
     assert reward == 0.0
-    assert obs["ego"].shape == (6,)
+    assert obs["ego"].shape == (5,)
     assert obs["peers"].shape == (ObservationBuilder.MAX_PEERS, 6)
     assert info.get("truncated_reason") == "ego_route_ended"
 
