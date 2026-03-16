@@ -27,6 +27,7 @@ def _make_sumo(vehicle_states):
     mock.get_vehicle_state.side_effect = lambda vid: state_map[vid]
     mock.set_vehicle_speed = Mock()
     mock.slow_down = Mock()
+    mock.release_vehicle_speed = Mock()
     return mock
 
 
@@ -543,8 +544,6 @@ def test_resolve_step_in_expected_range(mock_sumo):
 
 def test_resolved_hazard_releases_to_cf(mock_sumo):
     """Run 021: resolved hazard calls release_vehicle_speed after delay."""
-    mock_sumo.release_vehicle_speed = Mock()
-
     # Find a seed that produces a resolved hazard
     for seed in range(100):
         inj = HazardInjector(seed=seed)
@@ -586,8 +585,6 @@ def test_resolved_hazard_releases_to_cf(mock_sumo):
 
 def test_persistent_hazard_never_releases(mock_sumo):
     """Run 021: persistent hazard (no resolve) never calls release_vehicle_speed."""
-    mock_sumo.release_vehicle_speed = Mock()
-
     # Find a seed that produces a persistent hazard
     for seed in range(100):
         inj = HazardInjector(seed=seed)
@@ -611,3 +608,206 @@ def test_persistent_hazard_never_releases(mock_sumo):
         return
 
     pytest.fail("No seed produced a persistent hazard in 100 trials")
+
+
+# =============================================================================
+# Run 023: state-triggered onset tests
+# =============================================================================
+
+
+class TestStateBucketTrigger:
+    """Tests for state_bucket trigger mode (Run 023 H1)."""
+
+    def _make_convoy_sumo(self, gap_to_v002=30.0, gap_to_v003=60.0):
+        """Convoy heading North: V001 at origin, V002 and V003 ahead."""
+        return _make_sumo([
+            _make_vehicle_state("V001", x=0.0, y=0.0, heading=0.0, speed=13.9),
+            _make_vehicle_state("V002", x=0.0, y=gap_to_v002, heading=0.0, speed=13.9),
+            _make_vehicle_state("V003", x=0.0, y=gap_to_v003, heading=0.0, speed=13.9),
+        ])
+
+    def test_state_bucket_mode_sets_trigger_mode(self):
+        """Trigger mode is recorded correctly."""
+        inj = HazardInjector(
+            seed=42,
+            trigger_mode=HazardInjector.TRIGGER_MODE_STATE_BUCKET,
+        )
+        inj.reset()
+        assert inj.trigger_mode == HazardInjector.TRIGGER_MODE_STATE_BUCKET
+
+    def test_state_bucket_does_not_fire_before_search_window(self):
+        """No injection before STATE_BUCKET_SEARCH_START."""
+        sumo = self._make_convoy_sumo(gap_to_v002=25.0)
+        inj = HazardInjector(
+            seed=42,
+            target_strategy=HazardInjector.TARGET_STRATEGY_UNIFORM_FRONT_PEERS,
+            trigger_mode=HazardInjector.TRIGGER_MODE_STATE_BUCKET,
+        )
+        inj.reset(options={"force_hazard": True})
+
+        for step in range(HazardInjector.STATE_BUCKET_SEARCH_START):
+            assert inj.maybe_inject(step=step, sumo=sumo) is False
+
+    def test_state_bucket_fires_on_bucket_match(self):
+        """Injection occurs when gap enters the sampled bucket."""
+        # Place V002 at 25m (inside "medium" bucket [22, 35)).
+        sumo = self._make_convoy_sumo(gap_to_v002=25.0)
+        inj = HazardInjector(
+            seed=42,
+            target_strategy=HazardInjector.TARGET_STRATEGY_NEAREST,
+            trigger_mode=HazardInjector.TRIGGER_MODE_STATE_BUCKET,
+        )
+        inj.reset(options={"force_hazard": True})
+
+        # Manually set the desired bucket to match the gap.
+        # We iterate until the search window starts, then check.
+        injected = False
+        for step in range(150, 351):
+            # After first call at step 150, the search activates.
+            if inj._sb_search_active and inj._sb_desired_bucket:
+                # Force desired bucket to one that matches 25m.
+                inj._sb_desired_bucket = "medium"
+            if inj.maybe_inject(step=step, sumo=sumo):
+                injected = True
+                break
+
+        assert injected is True
+        assert inj.trigger_result == "bucket_match"
+        assert inj.onset_gap_bucket == "medium"
+        assert inj.onset_gap_m is not None
+        assert 22.0 <= inj.onset_gap_m < 35.0
+
+    def test_state_bucket_falls_back_at_search_end(self):
+        """If bucket never matches, fallback fires at step 350."""
+        # Place V002 at 10m — below all bucket ranges.
+        sumo = self._make_convoy_sumo(gap_to_v002=10.0)
+        inj = HazardInjector(
+            seed=42,
+            target_strategy=HazardInjector.TARGET_STRATEGY_NEAREST,
+            trigger_mode=HazardInjector.TRIGGER_MODE_STATE_BUCKET,
+        )
+        inj.reset(options={"force_hazard": True})
+
+        injected = False
+        for step in range(150, 351):
+            if inj.maybe_inject(step=step, sumo=sumo):
+                injected = True
+                break
+
+        assert injected is True
+        assert inj.trigger_result == "fallback_step"
+        assert inj.onset_trigger_step == HazardInjector.STATE_BUCKET_FALLBACK_STEP
+
+    def test_state_bucket_records_onset_metadata(self):
+        """Onset telemetry fields are populated after injection."""
+        sumo = self._make_convoy_sumo(gap_to_v002=30.0)
+        inj = HazardInjector(
+            seed=42,
+            target_strategy=HazardInjector.TARGET_STRATEGY_NEAREST,
+            trigger_mode=HazardInjector.TRIGGER_MODE_STATE_BUCKET,
+        )
+        inj.reset(options={"force_hazard": True})
+
+        for step in range(150, 351):
+            if inj._sb_search_active and inj._sb_desired_bucket:
+                inj._sb_desired_bucket = "medium"  # 30m is in [22, 35)
+            if inj.maybe_inject(step=step, sumo=sumo):
+                break
+
+        assert inj.onset_trigger_step is not None
+        assert inj.onset_peer_count is not None
+        assert inj.onset_peer_count >= 1
+        assert inj.onset_closing_speed_mps is not None
+        assert inj.onset_desired_rank_ahead is not None
+
+    def test_explicit_hazard_step_overrides_state_bucket(self):
+        """Passing hazard_step forces fixed_step even if default is state_bucket."""
+        inj = HazardInjector(
+            seed=42,
+            trigger_mode=HazardInjector.TRIGGER_MODE_STATE_BUCKET,
+        )
+        inj.reset(options={"force_hazard": True, "hazard_step": 200})
+
+        assert inj.trigger_mode == HazardInjector.TRIGGER_MODE_FIXED_STEP
+        assert inj.hazard_step == 200
+
+    def test_reset_clears_onset_metadata(self):
+        """Reset clears all Run 023 onset fields."""
+        inj = HazardInjector(
+            seed=42,
+            trigger_mode=HazardInjector.TRIGGER_MODE_STATE_BUCKET,
+        )
+        # Simulate some onset data.
+        inj._onset_gap_bucket = "close"
+        inj._onset_gap_m = 15.0
+        inj._onset_trigger_step = 180
+        inj._sb_search_active = True
+
+        inj.reset()
+
+        assert inj.onset_gap_bucket is None
+        assert inj.onset_gap_m is None
+        assert inj.onset_trigger_step is None
+        assert inj._sb_search_active is False
+
+
+class TestGapBucketHelpers:
+    """Tests for gap bucket classification and sampling."""
+
+    def test_gap_in_bucket_close(self):
+        assert HazardInjector.gap_in_bucket(12.0, "close") is True
+        assert HazardInjector.gap_in_bucket(21.9, "close") is True
+        assert HazardInjector.gap_in_bucket(22.0, "close") is False
+        assert HazardInjector.gap_in_bucket(11.9, "close") is False
+
+    def test_gap_in_bucket_medium(self):
+        assert HazardInjector.gap_in_bucket(22.0, "medium") is True
+        assert HazardInjector.gap_in_bucket(34.9, "medium") is True
+        assert HazardInjector.gap_in_bucket(35.0, "medium") is False
+
+    def test_gap_in_bucket_far(self):
+        assert HazardInjector.gap_in_bucket(35.0, "far") is True
+        assert HazardInjector.gap_in_bucket(54.9, "far") is True
+        assert HazardInjector.gap_in_bucket(55.0, "far") is False
+
+    def test_gap_in_bucket_very_far(self):
+        assert HazardInjector.gap_in_bucket(55.0, "very_far") is True
+        assert HazardInjector.gap_in_bucket(84.9, "very_far") is True
+        assert HazardInjector.gap_in_bucket(85.0, "very_far") is False
+
+    def test_eligible_gap_buckets_rank_1(self):
+        assert HazardInjector.eligible_gap_buckets(1) == ["close", "medium", "far"]
+
+    def test_eligible_gap_buckets_rank_2(self):
+        assert HazardInjector.eligible_gap_buckets(2) == ["medium", "far", "very_far"]
+
+    def test_eligible_gap_buckets_rank_3_plus(self):
+        assert HazardInjector.eligible_gap_buckets(3) == ["far", "very_far"]
+        assert HazardInjector.eligible_gap_buckets(5) == ["far", "very_far"]
+
+    def test_sample_onset_bucket_returns_valid(self):
+        inj = HazardInjector(seed=42)
+        for rank in [1, 2, 3, 4, 5]:
+            eligible = HazardInjector.eligible_gap_buckets(rank)
+            for _ in range(20):
+                bucket = inj._sample_onset_bucket(rank)
+                assert bucket in eligible
+
+
+class TestLongitudinalGap:
+    """Tests for the longitudinal gap computation."""
+
+    def test_gap_heading_north(self):
+        """Target ahead (north) of ego heading north → positive gap."""
+        gap = HazardInjector._longitudinal_gap(0, 0, 0.0, 0, 30)
+        assert gap == pytest.approx(30.0, abs=0.1)
+
+    def test_gap_heading_north_behind(self):
+        """Target behind ego → negative gap."""
+        gap = HazardInjector._longitudinal_gap(0, 0, 0.0, 0, -10)
+        assert gap == pytest.approx(-10.0, abs=0.1)
+
+    def test_gap_heading_east(self):
+        """Target east of ego heading east (90°) → positive gap."""
+        gap = HazardInjector._longitudinal_gap(0, 0, 90.0, 30, 0)
+        assert gap == pytest.approx(30.0, abs=0.1)

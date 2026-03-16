@@ -56,13 +56,18 @@ BRAKING_DECAY = 0.95  # matches ConvoyEnv.BRAKING_DECAY
 MODEL_ACTION_THRESHOLD = 0.1  # model action above this = model brakes
 MAX_DECEL = 8.0  # m/s², matches training
 
-# Current ego observation layout (Run 022+):
-# [speed/30, accel/10, peer_count/8, min_peer_accel/10, braking_received]
+# Current ego observation layout (Run 023+):
+# [speed/30, accel/10, peer_count/8, min_peer_accel/10,
+#  braking_received, max_closing_speed/30]
 EGO_SPEED_IDX = 0
 EGO_ACCEL_IDX = 1
 EGO_PEER_COUNT_IDX = 2
 EGO_MIN_PEER_ACCEL_IDX = 3
 EGO_BRAKING_RECEIVED_IDX = 4
+EGO_MAX_CLOSING_SPEED_IDX = 5
+
+# Run 023 H4: self-RX vehicle ID to exclude from replay peer observations.
+SELF_RX_VEHICLE_ID = "V001"
 
 
 @dataclass
@@ -129,15 +134,21 @@ def build_ego_state(row: SensorRow) -> Tuple[VehicleState, Tuple[float, float]]:
 def build_peer_observations(
     rx_rows: List[SensorRow],
     current_time_ms: int,
+    exclude_vehicle_id: Optional[str] = SELF_RX_VEHICLE_ID,
 ) -> List[Dict[str, float]]:
     """
     Build peer observation dicts from RX rows within the staleness window.
 
     For each source vehicle, keep only the freshest message.
+    Run 023 H4: excludes self-RX messages (ego vehicle appearing in its
+    own RX log) by default.
     """
     # Group by vehicle, keep freshest
     freshest: Dict[str, SensorRow] = {}
     for r in rx_rows:
+        # Run 023 H4: skip self-messages.
+        if exclude_vehicle_id and r.vehicle_id == exclude_vehicle_id:
+            continue
         age = current_time_ms - r.timestamp_local_ms
         if age < 0 or age > STALENESS_THRESHOLD_MS:
             continue
@@ -291,6 +302,7 @@ def run_replay(
         "min_peer_accel": [],
         "braking_received": [],
         "any_braking_peer": [],
+        "max_closing_speed": [],
     }
 
     rx_window_start = 0
@@ -357,6 +369,7 @@ def run_replay(
         visible_peers = int(np.sum(observation["peer_mask"]))
         min_pa = float(observation["ego"][EGO_MIN_PEER_ACCEL_IDX]) * obs_builder.MAX_ACCEL
         braking_received_obs = float(observation["ego"][EGO_BRAKING_RECEIVED_IDX])
+        max_closing_speed_obs = float(observation["ego"][EGO_MAX_CLOSING_SPEED_IDX]) * obs_builder.MAX_SPEED
 
         results["timestamps_ms"].append(step_t)
         results["ego_speed"].append(float(ego_row.speed))
@@ -368,6 +381,7 @@ def run_replay(
         results["min_peer_accel"].append(min_pa)
         results["braking_received"].append(braking_received_obs)
         results["any_braking_peer"].append(any_braking_this_step)
+        results["max_closing_speed"].append(max_closing_speed_obs)
 
     print(f"  Completed: {len(results['timestamps_ms'])} steps with model output")
 
@@ -499,6 +513,7 @@ def run_replay(
         min_peer_accel=np.array(results["min_peer_accel"]),
         braking_received=np.array(results["braking_received"], dtype=np.float32),
         any_braking_peer=np.array(results["any_braking_peer"], dtype=bool),
+        max_closing_speed=np.array(results["max_closing_speed"], dtype=np.float32),
     )
     print(f"  Timeseries saved: {timeseries_path}")
 

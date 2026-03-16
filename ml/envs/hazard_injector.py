@@ -1,5 +1,11 @@
 """
 Hazard injection utilities for ConvoyEnv.
+
+Run 023: adds state-triggered onset mode (``state_bucket``) alongside the
+original ``fixed_step`` mode.  In ``state_bucket`` mode the injector
+waits until a chosen front peer reaches a sampled rank/gap onset bucket
+before firing, broadening the diversity of relative convoy states at
+hazard onset.
 """
 import math
 import random
@@ -55,18 +61,45 @@ class HazardInjector:
         TARGET_STRATEGY_FIXED_RANK_AHEAD,
     }
 
+    # --- Run 023: trigger modes -----------------------------------------------
+    TRIGGER_MODE_FIXED_STEP = "fixed_step"
+    TRIGGER_MODE_STATE_BUCKET = "state_bucket"
+
+    # Gap buckets (longitudinal ego-to-source, metres).
+    GAP_BUCKETS: Dict[str, Tuple[float, float]] = {
+        "close":    (12.0, 22.0),
+        "medium":   (22.0, 35.0),
+        "far":      (35.0, 55.0),
+        "very_far": (55.0, 85.0),
+    }
+
+    # Rank-conditioned eligible gap buckets.
+    RANK_GAP_BUCKETS: Dict[int, List[str]] = {
+        1: ["close", "medium", "far"],
+        2: ["medium", "far", "very_far"],
+    }
+    # Rank 3+ gets "far" and "very_far".
+    RANK_GAP_BUCKETS_DEFAULT = ["far", "very_far"]
+
+    # Search window for state_bucket mode (training only).
+    STATE_BUCKET_SEARCH_START = HAZARD_WINDOW_START   # step 150
+    STATE_BUCKET_SEARCH_END = HAZARD_WINDOW_END       # step 300
+    STATE_BUCKET_FALLBACK_STEP = HAZARD_WINDOW_END    # hard fallback
+
     def __init__(
         self,
         seed: Optional[int] = None,
         target_strategy: str = TARGET_STRATEGY_NEAREST,
         fixed_vehicle_id: Optional[str] = None,
         fixed_rank_ahead: Optional[int] = None,
+        trigger_mode: str = TRIGGER_MODE_FIXED_STEP,
     ) -> None:
         self._validate_target_strategy(target_strategy)
         self._rng = random.Random(seed)
         self._default_target_strategy = target_strategy
         self._default_fixed_vehicle_id = fixed_vehicle_id
         self._default_fixed_rank_ahead = fixed_rank_ahead
+        self._default_trigger_mode = trigger_mode
 
         self._hazard_step: Optional[int] = None
         self._hazard_injected = False
@@ -84,6 +117,54 @@ class HazardInjector:
                 f"Invalid target_strategy '{target_strategy}'. "
                 f"Expected one of {sorted(self.ALLOWED_TARGET_STRATEGIES)}"
             )
+
+    # ------------------------------------------------------------------
+    #  Gap-bucket helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def eligible_gap_buckets(cls, rank: int) -> List[str]:
+        """Return gap-bucket names eligible for the given rank ahead."""
+        return cls.RANK_GAP_BUCKETS.get(rank, cls.RANK_GAP_BUCKETS_DEFAULT)
+
+    def _sample_onset_bucket(self, rank: int) -> str:
+        """Sample a gap bucket uniformly from rank-eligible set."""
+        buckets = self.eligible_gap_buckets(rank)
+        return self._rng.choice(buckets)
+
+    @classmethod
+    def gap_in_bucket(cls, gap_m: float, bucket_name: str) -> bool:
+        """Return True if *gap_m* falls inside *bucket_name*."""
+        lo, hi = cls.GAP_BUCKETS[bucket_name]
+        return lo <= gap_m < hi
+
+    # ------------------------------------------------------------------
+    #  Longitudinal-gap computation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _longitudinal_gap(
+        ego_x: float,
+        ego_y: float,
+        ego_heading: float,
+        target_x: float,
+        target_y: float,
+    ) -> float:
+        """
+        Signed longitudinal gap from ego to target along ego's heading.
+
+        Positive means target is ahead.
+        """
+        heading_rad = math.radians(float(ego_heading))
+        forward_x = math.sin(heading_rad)
+        forward_y = math.cos(heading_rad)
+        dx = target_x - ego_x
+        dy = target_y - ego_y
+        return dx * forward_x + dy * forward_y
+
+    # ------------------------------------------------------------------
+    #  Reset
+    # ------------------------------------------------------------------
 
     def _reset_state(self, options: Optional[Dict[str, Any]] = None) -> None:
         opts = options or {}
@@ -112,10 +193,17 @@ class HazardInjector:
         else:
             self._episode_will_have_hazard = bool(force_hazard_opt)
 
+        # --- trigger mode ---
+        trigger_mode = str(
+            opts.get("trigger_mode", self._default_trigger_mode)
+        )
+        self._trigger_mode = trigger_mode
+
         hazard_step_opt = opts.get("hazard_step", None)
         if not self._episode_will_have_hazard:
             self._hazard_step = None
         elif hazard_step_opt is not None:
+            # Explicit hazard_step forces fixed_step mode regardless.
             hazard_step = int(hazard_step_opt)
             if not self.is_in_hazard_window(hazard_step):
                 raise ValueError(
@@ -123,6 +211,10 @@ class HazardInjector:
                     f"[{self.HAZARD_WINDOW_START}, {self.HAZARD_WINDOW_END}]"
                 )
             self._hazard_step = hazard_step
+            self._trigger_mode = self.TRIGGER_MODE_FIXED_STEP
+        elif self._trigger_mode == self.TRIGGER_MODE_STATE_BUCKET:
+            # State-bucket mode: hazard_step is determined at runtime.
+            self._hazard_step = None
         else:
             self._hazard_step = self.DEFAULT_HAZARD_STEP
 
@@ -139,6 +231,21 @@ class HazardInjector:
         self._should_resolve: bool = False
         self._resolve_step: Optional[int] = None
         self._hazard_resolved: bool = False
+
+        # Run 023: onset-bucket telemetry.
+        self._onset_trigger_result: Optional[str] = None
+        self._onset_gap_bucket: Optional[str] = None
+        self._onset_gap_m: Optional[float] = None
+        self._onset_closing_speed_mps: Optional[float] = None
+        self._onset_peer_count: Optional[int] = None
+        self._onset_trigger_step: Optional[int] = None
+        self._onset_desired_rank_ahead: Optional[int] = None
+
+        # Pre-sample state-bucket parameters for this episode.
+        self._sb_target_vid: Optional[str] = None
+        self._sb_target_rank: Optional[int] = None
+        self._sb_desired_bucket: Optional[str] = None
+        self._sb_search_active: bool = False
 
     def reset(self, options: Optional[Dict[str, Any]] = None) -> None:
         self._reset_state(options=options)
@@ -207,15 +314,117 @@ class HazardInjector:
 
         return None, None
 
+    # ------------------------------------------------------------------
+    #  Injection (supports both fixed_step and state_bucket)
+    # ------------------------------------------------------------------
+
     def maybe_inject(self, step: int, sumo: "SUMOConnection") -> bool:
         if self._hazard_injected:
             return False
         if not self._episode_will_have_hazard:
             return False
+
+        if self._trigger_mode == self.TRIGGER_MODE_STATE_BUCKET:
+            return self._maybe_inject_state_bucket(step, sumo)
+
+        # fixed_step mode: inject at the exact scheduled step.
         if self._hazard_step is None or step != self._hazard_step:
             return False
+        return self._do_inject(step, sumo, trigger_result="fixed_step")
 
+    def _maybe_inject_state_bucket(
+        self, step: int, sumo: "SUMOConnection"
+    ) -> bool:
+        """State-bucket trigger: search for onset condition each step."""
+        if step < self.STATE_BUCKET_SEARCH_START:
+            return False
+
+        # ---- First time entering search window: pick target + bucket ----
+        if not self._sb_search_active:
+            front_peers = self._front_peers_with_rank(sumo)
+            if not front_peers:
+                # No front peers yet — wait until one appears or fallback.
+                if step >= self.STATE_BUCKET_FALLBACK_STEP:
+                    return self._do_inject(
+                        step, sumo, trigger_result="fallback_step"
+                    )
+                return False
+
+            # Pick a target using the configured strategy.
+            target, rank = self._select_target(front_peers)
+            if target is None or rank is None:
+                if step >= self.STATE_BUCKET_FALLBACK_STEP:
+                    return self._do_inject(
+                        step, sumo, trigger_result="fallback_step"
+                    )
+                return False
+
+            self._sb_target_vid = target
+            self._sb_target_rank = rank
+            self._sb_desired_bucket = self._sample_onset_bucket(rank)
+            self._sb_search_active = True
+            self._onset_desired_rank_ahead = rank
+
+        # ---- Check onset condition each step ----
+        ego_state = sumo.get_vehicle_state(self.EGO_VEHICLE_ID)
+        if not sumo.is_vehicle_active(self._sb_target_vid):
+            # Target left — fall back.
+            if step >= self.STATE_BUCKET_FALLBACK_STEP:
+                return self._do_inject(
+                    step, sumo, trigger_result="fallback_step"
+                )
+            return False
+
+        target_state = sumo.get_vehicle_state(self._sb_target_vid)
+        gap = self._longitudinal_gap(
+            ego_state.x, ego_state.y, ego_state.heading,
+            target_state.x, target_state.y,
+        )
+
+        if gap > 0 and self.gap_in_bucket(gap, self._sb_desired_bucket):
+            # Record onset telemetry before injection.
+            self._onset_gap_bucket = self._sb_desired_bucket
+            self._onset_gap_m = gap
+            self._onset_closing_speed_mps = ego_state.speed - target_state.speed
+            front_peers = self._front_peers_with_rank(sumo)
+            self._onset_peer_count = len(front_peers)
+            self._onset_trigger_step = step
+
+            # Force the pre-selected target/rank into _select_target by
+            # temporarily overriding strategy to fixed_rank_ahead.
+            saved_strategy = self._target_strategy
+            saved_rank = self._fixed_rank_ahead
+            self._target_strategy = self.TARGET_STRATEGY_FIXED_RANK_AHEAD
+            self._fixed_rank_ahead = self._sb_target_rank
+            result = self._do_inject(step, sumo, trigger_result="bucket_match")
+            self._target_strategy = saved_strategy
+            self._fixed_rank_ahead = saved_rank
+            return result
+
+        # ---- Fallback at end of search window ----
+        if step >= self.STATE_BUCKET_FALLBACK_STEP:
+            # Record what we had at fallback.
+            self._onset_gap_m = gap if gap > 0 else None
+            self._onset_closing_speed_mps = (
+                ego_state.speed - target_state.speed if gap > 0 else None
+            )
+            front_peers = self._front_peers_with_rank(sumo)
+            self._onset_peer_count = len(front_peers)
+            self._onset_trigger_step = step
+            self._onset_desired_rank_ahead = self._sb_target_rank
+            return self._do_inject(step, sumo, trigger_result="fallback_step")
+
+        return False
+
+    def _do_inject(
+        self,
+        step: int,
+        sumo: "SUMOConnection",
+        trigger_result: str = "fixed_step",
+    ) -> bool:
+        """Common injection path for both trigger modes."""
         self._hazard_injection_attempted = True
+        self._onset_trigger_result = trigger_result
 
         front_peers_with_rank = self._front_peers_with_rank(sumo)
         target, source_rank_ahead = self._select_target(front_peers_with_rank)
@@ -251,6 +460,14 @@ class HazardInjector:
         self._hazard_injected = True
         self._hazard_target = target
         self._hazard_source_rank_ahead = source_rank_ahead
+        self._hazard_step = step  # record actual injection step
+
+        # Onset telemetry for fixed_step mode (state_bucket fills these
+        # in _maybe_inject_state_bucket before calling _do_inject).
+        if self._onset_trigger_step is None:
+            self._onset_trigger_step = step
+        if self._onset_peer_count is None:
+            self._onset_peer_count = len(front_peers_with_rank)
 
         # Run 021: decide whether this hazard resolves (target resumes CF).
         self._should_resolve = self._rng.random() < self.HAZARD_RESOLVE_PROB
@@ -299,6 +516,10 @@ class HazardInjector:
     def is_in_hazard_window(self, step: int) -> bool:
         return self.HAZARD_WINDOW_START <= step <= self.HAZARD_WINDOW_END
 
+    # ------------------------------------------------------------------
+    #  Properties
+    # ------------------------------------------------------------------
+
     @property
     def hazard_injected(self) -> bool:
         return self._hazard_injected
@@ -346,3 +567,37 @@ class HazardInjector:
     @property
     def target_strategy(self) -> str:
         return self._target_strategy
+
+    # --- Run 023: onset metadata properties ---
+
+    @property
+    def trigger_mode(self) -> str:
+        return self._trigger_mode
+
+    @property
+    def trigger_result(self) -> Optional[str]:
+        return self._onset_trigger_result
+
+    @property
+    def onset_gap_bucket(self) -> Optional[str]:
+        return self._onset_gap_bucket
+
+    @property
+    def onset_gap_m(self) -> Optional[float]:
+        return self._onset_gap_m
+
+    @property
+    def onset_closing_speed_mps(self) -> Optional[float]:
+        return self._onset_closing_speed_mps
+
+    @property
+    def onset_peer_count(self) -> Optional[int]:
+        return self._onset_peer_count
+
+    @property
+    def onset_trigger_step(self) -> Optional[int]:
+        return self._onset_trigger_step
+
+    @property
+    def onset_desired_rank_ahead(self) -> Optional[int]:
+        return self._onset_desired_rank_ahead
