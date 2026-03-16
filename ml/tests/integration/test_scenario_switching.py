@@ -19,7 +19,7 @@ def test_multiple_resets_no_process_leaks(dataset_dir):
         for _ in range(10):
             obs, info = env.reset()
             assert "scenario_id" in info
-            assert obs["ego"].shape == (5,)
+            assert obs["ego"].shape == (6,)
     finally:
         env.close()
 

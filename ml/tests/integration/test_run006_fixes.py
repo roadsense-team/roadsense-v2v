@@ -361,7 +361,7 @@ def test_emulator_resets_per_episode(make_env):
     # The key check: observation is valid and finite
     assert np.isfinite(obs["ego"]).all()
     assert np.isfinite(obs["peers"]).all()
-    assert obs["ego"].shape == (5,)
+    assert obs["ego"].shape == (6,)
 
 
 # --- Smoke training test ---

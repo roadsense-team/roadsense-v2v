@@ -375,6 +375,83 @@ def _build_source_reaction_summary(episodes: List[dict]) -> Dict[str, Dict[str, 
     return summary
 
 
+def _build_onset_trigger_summary(episodes: List[dict]) -> dict:
+    """
+    Aggregate Run 023 onset-trigger metadata from eval episodes.
+
+    Returns counts by trigger result, gap bucket, and reaction rate
+    per onset bucket — used for diagnosing state-triggered onset coverage.
+    """
+    from collections import Counter
+
+    trigger_results = Counter()
+    gap_buckets = Counter()
+    onset_rank_counts = Counter()
+    onset_peer_counts = Counter()
+    onset_gaps: List[float] = []
+    onset_closing_speeds: List[float] = []
+
+    # Reaction rate by onset gap bucket
+    bucket_reaction: Dict[str, List[bool]] = {}
+
+    for ep in episodes:
+        tr = ep.get("onset_trigger_result")
+        if tr:
+            trigger_results[tr] += 1
+        bucket = ep.get("onset_gap_bucket")
+        if bucket:
+            gap_buckets[bucket] += 1
+            reacted = bool(ep.get("reaction_detected", False))
+            bucket_reaction.setdefault(bucket, []).append(reacted)
+        rank = ep.get("onset_desired_rank_ahead")
+        if rank is not None:
+            onset_rank_counts[str(rank)] += 1
+        pc = ep.get("onset_peer_count")
+        if pc is not None:
+            onset_peer_counts[str(pc)] += 1
+        gap = ep.get("onset_gap_m")
+        if gap is not None:
+            onset_gaps.append(float(gap))
+        cs = ep.get("onset_closing_speed_mps")
+        if cs is not None:
+            onset_closing_speeds.append(float(cs))
+
+    total = sum(trigger_results.values())
+    fallback_count = trigger_results.get("fallback_step", 0)
+    fallback_rate = fallback_count / total if total > 0 else 0.0
+
+    reaction_by_bucket = {}
+    for bucket, reactions in sorted(bucket_reaction.items()):
+        n = len(reactions)
+        r = sum(reactions)
+        reaction_by_bucket[bucket] = {
+            "episodes": n,
+            "reactions": r,
+            "reaction_rate": r / n if n > 0 else 0.0,
+        }
+
+    return {
+        "total_episodes_with_onset": total,
+        "trigger_result_counts": dict(trigger_results),
+        "fallback_rate": round(fallback_rate, 4),
+        "gap_bucket_counts": dict(gap_buckets),
+        "unique_gap_buckets": len(gap_buckets),
+        "onset_rank_counts": dict(sorted(onset_rank_counts.items())),
+        "onset_peer_counts": dict(sorted(onset_peer_counts.items())),
+        "reaction_rate_by_onset_bucket": reaction_by_bucket,
+        "onset_gap_stats": {
+            "mean": round(float(np.mean(onset_gaps)), 2) if onset_gaps else None,
+            "std": round(float(np.std(onset_gaps)), 2) if onset_gaps else None,
+            "min": round(float(np.min(onset_gaps)), 2) if onset_gaps else None,
+            "max": round(float(np.max(onset_gaps)), 2) if onset_gaps else None,
+        },
+        "onset_closing_speed_stats": {
+            "mean": round(float(np.mean(onset_closing_speeds)), 2) if onset_closing_speeds else None,
+            "std": round(float(np.std(onset_closing_speeds)), 2) if onset_closing_speeds else None,
+        },
+    }
+
+
 def train(args: argparse.Namespace) -> Tuple[str, Dict[str, int]]:
     """
     Train the model and return output path and metrics.
@@ -619,6 +696,13 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
             post_hazard_steps = 0
             terminated = False
             truncated = False
+            # Run 023 onset metadata
+            onset_trigger_result = None
+            onset_gap_bucket = None
+            onset_gap_m = None
+            onset_closing_speed_mps = None
+            onset_peer_count = None
+            onset_desired_rank_ahead = None
 
             while not (terminated or truncated):
                 action, _ = model.predict(obs, deterministic=True)
@@ -640,6 +724,14 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
                     hazard_source_id = info.get("hazard_source_id")
                     hazard_step = info.get("hazard_step", info.get("step"))
                     hazard_source_rank_ahead = info.get("hazard_source_rank_ahead")
+                    # Capture Run 023 onset metadata on injection step
+                    if onset_trigger_result is None:
+                        onset_trigger_result = info.get("hazard_trigger_result")
+                        onset_gap_bucket = info.get("hazard_onset_gap_bucket")
+                        onset_gap_m = info.get("hazard_onset_gap_m")
+                        onset_closing_speed_mps = info.get("hazard_onset_closing_speed_mps")
+                        onset_peer_count = info.get("hazard_onset_peer_count")
+                        onset_desired_rank_ahead = info.get("hazard_onset_desired_rank_ahead")
 
                 if hazard_injected:
                     post_hazard_steps += 1
@@ -720,6 +812,12 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
                     "matrix_target_source_rank_ahead": (
                         plan_entry.source_rank_ahead if plan_entry is not None else None
                     ),
+                    "onset_trigger_result": onset_trigger_result,
+                    "onset_gap_bucket": onset_gap_bucket,
+                    "onset_gap_m": onset_gap_m,
+                    "onset_closing_speed_mps": onset_closing_speed_mps,
+                    "onset_peer_count": onset_peer_count,
+                    "onset_desired_rank_ahead": onset_desired_rank_ahead,
                 }
             )
 
@@ -785,6 +883,9 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
                 f"{eval_matrix_summary['missing_buckets']}"
             )
 
+    # --- Run 023 onset trigger summary ---
+    onset_trigger_summary = _build_onset_trigger_summary(episode_details)
+
     metrics = {
         "eval_episodes": eval_episodes,
         "episodes_per_scenario": args.episodes_per_scenario,
@@ -822,6 +923,7 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
         "source_reaction_summary": source_reaction_summary,
         "eval_matrix": eval_matrix_summary,
         "eval_matrix_coverage_error": eval_matrix_coverage_error,
+        "onset_trigger_summary": onset_trigger_summary,
         "episode_details": episode_details,
     }
 

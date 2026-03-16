@@ -15,7 +15,8 @@ class ObservationBuilder:
     Builds observation dict for variable-n peer environments.
 
     Keys:
-        - ego: [speed/30, accel/10, peer_count/8, min_peer_accel/10, braking_received_decay]
+        - ego: [speed/30, accel/10, peer_count/8, min_peer_accel/10,
+                braking_received_decay, max_closing_speed/30]
         - peers: (MAX_PEERS, 6) peer features
         - peer_mask: (MAX_PEERS,) 1.0 for valid peers, 0.0 for padding
     """
@@ -131,8 +132,15 @@ class ObservationBuilder:
         # Compute min peer accel across valid cone-filtered peers
         # (most negative = hardest braker). Gives model a clean braking signal.
         min_peer_accel = 0.0
+        # Run 023 H2: max closing speed among visible front-cone peers.
+        # Positive = gap is shrinking.  Tells the model "react now" when
+        # combined with braking_received and min_peer_accel.
+        max_closing_speed = 0.0
         for peer in filtered_peers[:self.MAX_PEERS]:
             min_peer_accel = min(min_peer_accel, peer["accel"])
+            closing = ego_state.speed - peer["speed"]
+            if closing > max_closing_speed:
+                max_closing_speed = closing
 
         ego = np.array(
             [
@@ -141,6 +149,7 @@ class ObservationBuilder:
                 valid_count / self.MAX_PEERS,
                 min_peer_accel / self.MAX_ACCEL,
                 float(braking_received),
+                max_closing_speed / self.MAX_SPEED,
             ],
             dtype=np.float32,
         )

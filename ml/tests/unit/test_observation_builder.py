@@ -50,7 +50,7 @@ def test_build_observation_returns_dict_shapes():
     result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
 
     assert isinstance(result, dict)
-    assert result["ego"].shape == (5,)
+    assert result["ego"].shape == (6,)
     assert result["peers"].shape == (builder.MAX_PEERS, 6)
     assert result["peer_mask"].shape == (builder.MAX_PEERS,)
 
@@ -223,3 +223,54 @@ def test_build_observation_braking_received_decay():
 
     result_one = builder.build(ego_state, [], (ego_state.x, ego_state.y), braking_received=1.0)
     assert result_one["ego"][4] == pytest.approx(1.0)
+
+
+def test_build_observation_max_closing_speed_basic():
+    """ego[5] = max(ego_speed - peer_speed, 0) / MAX_SPEED across cone peers."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state(speed=20.0, heading=0.0)
+    peers = [
+        _make_peer_obs(0.0, 10.0, speed=15.0, valid=True),  # closing = 5
+        _make_peer_obs(0.0, 20.0, speed=10.0, valid=True),  # closing = 10
+    ]
+
+    result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
+
+    # max closing = 10.0, normalized by MAX_SPEED=30 -> 10/30 ≈ 0.333
+    assert result["ego"][5] == pytest.approx(10.0 / 30.0, abs=1e-5)
+
+
+def test_build_observation_max_closing_speed_zero_when_peer_faster():
+    """Closing speed is 0 when all peers are faster than ego."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state(speed=10.0, heading=0.0)
+    peers = [_make_peer_obs(0.0, 15.0, speed=20.0, valid=True)]
+
+    result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
+
+    assert result["ego"][5] == pytest.approx(0.0)
+
+
+def test_build_observation_max_closing_speed_zero_when_no_peers():
+    """Closing speed is 0 when no peers are visible."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state(speed=15.0)
+
+    result = builder.build(ego_state, [], (ego_state.x, ego_state.y))
+
+    assert result["ego"][5] == pytest.approx(0.0)
+
+
+def test_build_observation_max_closing_speed_ignores_behind_peers():
+    """Closing speed only considers cone-filtered (forward) peers."""
+    builder = ObservationBuilder()
+    ego_state = _make_ego_state(speed=20.0, heading=0.0)
+    peers = [
+        _make_peer_obs(0.0, -50.0, speed=5.0, valid=True),   # behind (closing=15 but filtered)
+        _make_peer_obs(0.0, 20.0, speed=18.0, valid=True),    # ahead (closing=2)
+    ]
+
+    result = builder.build(ego_state, peers, (ego_state.x, ego_state.y))
+
+    # Only ahead peer counted: closing = 2.0 / 30.0
+    assert result["ego"][5] == pytest.approx(2.0 / 30.0, abs=1e-5)

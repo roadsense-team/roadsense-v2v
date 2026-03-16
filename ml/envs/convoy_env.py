@@ -109,8 +109,8 @@ class ConvoyEnv(gym.Env):
 
         self.observation_space = spaces.Dict({
             "ego": spaces.Box(
-                low=np.array([0.0, -1.0, 0.0, -1.0, 0.0], dtype=np.float32),
-                high=np.array([1.0, 1.0, 1.0, 0.0, 1.0], dtype=np.float32),
+                low=np.array([0.0, -1.0, 0.0, -1.0, 0.0, 0.0], dtype=np.float32),
+                high=np.array([1.0, 1.0, 1.0, 0.0, 1.0, 1.0], dtype=np.float32),
                 dtype=np.float32,
             ),
             "peers": spaces.Box(
@@ -292,7 +292,7 @@ class ConvoyEnv(gym.Env):
         # Must check BEFORE any TraCI calls (apply/inject) to avoid crash.
         if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
             empty_obs = {
-                "ego": np.zeros(5, dtype=np.float32),
+                "ego": np.zeros(6, dtype=np.float32),
                 "peers": np.zeros((self.MAX_PEERS, 6), dtype=np.float32),
                 "peer_mask": np.zeros(self.MAX_PEERS, dtype=np.float32),
             }
@@ -337,7 +337,7 @@ class ConvoyEnv(gym.Env):
         # Post-step guard: V001 may have left during this sumo.step().
         if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
             empty_obs = {
-                "ego": np.zeros(5, dtype=np.float32),
+                "ego": np.zeros(6, dtype=np.float32),
                 "peers": np.zeros((self.MAX_PEERS, 6), dtype=np.float32),
                 "peer_mask": np.zeros(self.MAX_PEERS, dtype=np.float32),
             }
@@ -451,6 +451,38 @@ class ConvoyEnv(gym.Env):
             "hazard_resolved": (
                 self.hazard_injector.hazard_resolved
                 if self.hazard_injector is not None else False
+            ),
+            "hazard_trigger_mode": (
+                self.hazard_injector.trigger_mode
+                if self.hazard_injector is not None else None
+            ),
+            "hazard_trigger_result": (
+                self.hazard_injector.trigger_result
+                if self.hazard_injector is not None else None
+            ),
+            "hazard_onset_gap_bucket": (
+                self.hazard_injector.onset_gap_bucket
+                if self.hazard_injector is not None else None
+            ),
+            "hazard_onset_gap_m": (
+                self.hazard_injector.onset_gap_m
+                if self.hazard_injector is not None else None
+            ),
+            "hazard_onset_closing_speed_mps": (
+                self.hazard_injector.onset_closing_speed_mps
+                if self.hazard_injector is not None else None
+            ),
+            "hazard_onset_peer_count": (
+                self.hazard_injector.onset_peer_count
+                if self.hazard_injector is not None else None
+            ),
+            "hazard_onset_trigger_step": (
+                self.hazard_injector.onset_trigger_step
+                if self.hazard_injector is not None else None
+            ),
+            "hazard_onset_desired_rank_ahead": (
+                self.hazard_injector.onset_desired_rank_ahead
+                if self.hazard_injector is not None else None
             ),
             "mesh_received_source_ids": mesh_received_source_ids,
             "mesh_any_braking_peer_received": any_braking_peer_received,

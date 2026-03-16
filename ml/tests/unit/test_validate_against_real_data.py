@@ -147,3 +147,44 @@ def test_run_replay_extracts_current_ego_indices(tmp_path):
     assert timeseries["peer_count"].tolist() == [1]
     assert timeseries["min_peer_accel"].tolist() == pytest.approx([-4.0])
     assert timeseries["braking_received"].tolist() == pytest.approx([1.0])
+    assert "max_closing_speed" in timeseries
+
+
+def test_build_peer_observations_excludes_self_rx():
+    """Run 023 H4: V001 self-messages in RX log are excluded by default."""
+    current_time_ms = 1000
+    rx_rows = [
+        validate_against_real_data.SensorRow(
+            timestamp_local_ms=900,
+            msg_timestamp=900,
+            vehicle_id="V001",  # self-RX
+            lat=0.0,
+            lon=0.0,
+            speed=10.0,
+            heading=0.0,
+            accel_fwd=0.0,
+            hop_count=0,
+        ),
+        validate_against_real_data.SensorRow(
+            timestamp_local_ms=950,
+            msg_timestamp=950,
+            vehicle_id="V002",
+            lat=0.0001,
+            lon=0.0,
+            speed=8.0,
+            heading=0.0,
+            accel_fwd=-3.0,
+            hop_count=0,
+        ),
+    ]
+
+    # Default: excludes V001
+    peers = validate_against_real_data.build_peer_observations(rx_rows, current_time_ms)
+    assert len(peers) == 1
+    assert peers[0]["accel"] == pytest.approx(-3.0)
+
+    # Explicit None: includes V001
+    peers_all = validate_against_real_data.build_peer_observations(
+        rx_rows, current_time_ms, exclude_vehicle_id=None
+    )
+    assert len(peers_all) == 2

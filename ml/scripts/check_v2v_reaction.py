@@ -229,6 +229,9 @@ def main() -> None:
             post_hazard_steps = 0
             terminated = False
             truncated = False
+            # Run 023 onset metadata
+            onset_trigger_result = None
+            onset_gap_bucket = None
 
             while not (terminated or truncated):
                 action, _ = model.predict(obs, deterministic=True)
@@ -250,6 +253,9 @@ def main() -> None:
                     hazard_source_id = info.get("hazard_source_id")
                     hazard_step = info.get("hazard_step", info.get("step"))
                     hazard_source_rank_ahead = info.get("hazard_source_rank_ahead")
+                    if onset_trigger_result is None:
+                        onset_trigger_result = info.get("hazard_trigger_result")
+                        onset_gap_bucket = info.get("hazard_onset_gap_bucket")
 
                 if hazard_injected:
                     post_hazard_steps += 1
@@ -313,6 +319,8 @@ def main() -> None:
                         if post_hazard_steps > 0
                         else 0.0
                     ),
+                    "onset_trigger_result": onset_trigger_result,
+                    "onset_gap_bucket": onset_gap_bucket,
                 }
             )
 
