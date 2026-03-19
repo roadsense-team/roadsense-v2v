@@ -60,3 +60,4 @@ training-run*.log
 events.out.tfevents.*
 cloud_prod_014*
 vecnormalize.pkl
+replay_ft_*.zip

@@ -1,6 +1,7 @@
 """
 ConvoyEnv Gymnasium environment.
 """
+from collections import deque
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import gymnasium as gym
@@ -34,6 +35,11 @@ class ConvoyEnv(gym.Env):
     BRAKING_DECAY = 0.95  # per-step at 10Hz → half-life ~1.35s
     CF_OVERRIDE_GRACE_STEPS = 3
 
+    # Single-frame ego observation bounds (6-dim).
+    _EGO_LOW = np.array([0.0, -1.0, 0.0, -1.0, 0.0, 0.0], dtype=np.float32)
+    _EGO_HIGH = np.array([1.0, 1.0, 1.0, 0.0, 1.0, 1.0], dtype=np.float32)
+    EGO_SINGLE_FRAME_DIM = 6
+
     def __init__(
         self,
         sumo_cfg: Optional[str] = None,
@@ -49,8 +55,13 @@ class ConvoyEnv(gym.Env):
         hazard_fixed_rank_ahead: Optional[int] = None,
         render_mode: Optional[str] = None,
         gui: bool = False,
+        ego_stack_frames: int = 1,
     ) -> None:
         super().__init__()
+
+        if ego_stack_frames < 1:
+            raise ValueError(f"ego_stack_frames must be >= 1, got {ego_stack_frames}")
+        self.ego_stack_frames = ego_stack_frames
 
         if sumo_cfg is None and dataset_dir is None:
             raise ValueError("Must provide either sumo_cfg or dataset_dir")
@@ -106,12 +117,15 @@ class ConvoyEnv(gym.Env):
         self._cf_override_active = False
         self._hazard_source_braking_latched = False
         self._braking_received_decay = 0.0
+        # Ego frame stacking history (Run 025)
+        self._ego_history: deque = deque(maxlen=self.ego_stack_frames)
+
+        ego_low = np.tile(self._EGO_LOW, self.ego_stack_frames)
+        ego_high = np.tile(self._EGO_HIGH, self.ego_stack_frames)
 
         self.observation_space = spaces.Dict({
             "ego": spaces.Box(
-                low=np.array([0.0, -1.0, 0.0, -1.0, 0.0, 0.0], dtype=np.float32),
-                high=np.array([1.0, 1.0, 1.0, 0.0, 1.0, 1.0], dtype=np.float32),
-                dtype=np.float32,
+                low=ego_low, high=ego_high, dtype=np.float32,
             ),
             "peers": spaces.Box(
                 low=-np.inf,
@@ -271,6 +285,12 @@ class ConvoyEnv(gym.Env):
 
         observation, _, _, _ = self._step_espnow(ego_state, current_time_ms)
 
+        # Initialize ego history with N copies of the first ego vector (Run 025)
+        self._ego_history.clear()
+        for _ in range(self.ego_stack_frames):
+            self._ego_history.append(observation["ego"].copy())
+        observation["ego"] = self._stack_ego()
+
         info = {
             "step": 0,
             "simulation_time": self.sumo.get_simulation_time(),
@@ -292,7 +312,7 @@ class ConvoyEnv(gym.Env):
         # Must check BEFORE any TraCI calls (apply/inject) to avoid crash.
         if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
             empty_obs = {
-                "ego": np.zeros(6, dtype=np.float32),
+                "ego": np.zeros(self.ego_stack_frames * self.EGO_SINGLE_FRAME_DIM, dtype=np.float32),
                 "peers": np.zeros((self.MAX_PEERS, 6), dtype=np.float32),
                 "peer_mask": np.zeros(self.MAX_PEERS, dtype=np.float32),
             }
@@ -337,7 +357,7 @@ class ConvoyEnv(gym.Env):
         # Post-step guard: V001 may have left during this sumo.step().
         if not self.sumo.is_vehicle_active(self.EGO_VEHICLE_ID):
             empty_obs = {
-                "ego": np.zeros(6, dtype=np.float32),
+                "ego": np.zeros(self.ego_stack_frames * self.EGO_SINGLE_FRAME_DIM, dtype=np.float32),
                 "peers": np.zeros((self.MAX_PEERS, 6), dtype=np.float32),
                 "peer_mask": np.zeros(self.MAX_PEERS, dtype=np.float32),
             }
@@ -357,6 +377,11 @@ class ConvoyEnv(gym.Env):
             received_map,
             any_braking_peer_received,
         ) = self._step_espnow(ego_state, current_time_ms)
+
+        # Ego frame stacking (Run 025)
+        self._ego_history.append(observation["ego"].copy())
+        observation["ego"] = self._stack_ego()
+
         distance, closing_rate = self._calculate_min_distance_and_closing_rate(
             ego_state, peer_states
         )
@@ -587,6 +612,14 @@ class ConvoyEnv(gym.Env):
             dict(received_map),
             any_braking_peer_received,
         )
+
+    def _stack_ego(self) -> np.ndarray:
+        """Flatten ego history deque into a single vector.
+
+        Order: [ego_t, ego_{t-1}, ..., ego_{t-N+1}] — most recent first.
+        When ego_stack_frames=1, returns the single (6,) vector unchanged.
+        """
+        return np.concatenate(list(reversed(self._ego_history)), dtype=np.float32)
 
     def _calculate_min_distance_and_closing_rate(
         self,

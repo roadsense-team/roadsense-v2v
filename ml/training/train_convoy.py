@@ -219,6 +219,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run SUMO with GUI (for debugging).",
     )
+    parser.add_argument(
+        "--ego_stack_frames",
+        type=int,
+        default=1,
+        help=(
+            "Number of ego observation frames to stack (Run 025). "
+            "Default 1 = no stacking (backward compatible). "
+            "Use 3 for temporal context."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -477,6 +487,7 @@ def train(args: argparse.Namespace) -> Tuple[str, Dict[str, int]]:
         "gui": args.gui,
         "emulator_params_path": args.emulator_params,
         "scenario_seed": args.seed,
+        "ego_stack_frames": args.ego_stack_frames,
     }
 
     if args.dataset_dir is not None:
@@ -499,7 +510,10 @@ def train(args: argparse.Namespace) -> Tuple[str, Dict[str, int]]:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    policy_kwargs = create_deep_set_policy_kwargs(peer_embed_dim=32)
+    policy_kwargs = create_deep_set_policy_kwargs(
+        peer_embed_dim=32,
+        ego_feature_dim=args.ego_stack_frames * 6,
+    )
 
     checkpoint_callback = CheckpointCallback(
         save_freq=10_000,
@@ -634,6 +648,7 @@ def evaluate(model_path: str, args: argparse.Namespace) -> dict:
         "hazard_injection": not args.no_eval_hazard_injection,
         "emulator_params_path": args.emulator_params,
         "scenario_seed": args.seed,
+        "ego_stack_frames": args.ego_stack_frames,
     }
 
     if args.dataset_dir is not None:
@@ -982,6 +997,7 @@ def save_metrics(
             "learning_rate": args.learning_rate,
             "n_steps": args.n_steps,
             "ent_coef": args.ent_coef,
+            "ego_stack_frames": args.ego_stack_frames,
         },
         "training": training_metrics,
         "evaluation": eval_metrics,
