@@ -60,6 +60,31 @@ class RewardCalculator:
     EARLY_REACTION_DIST = 15.0
     STOPPED_SPEED_THRESHOLD = 0.5
 
+    def __init__(
+        self,
+        *,
+        early_reaction_threshold: float = 0.01,
+        ignoring_hazard_threshold: float = 0.01,
+        ignoring_require_danger_geometry: bool = False,
+        ignoring_danger_distance: float = 20.0,
+        ignoring_danger_closing_rate: float = 0.5,
+        ignoring_use_any_braking_peer: bool = False,
+    ) -> None:
+        """Configure hazard-reaction reward shaping.
+
+        Defaults preserve the existing SUMO reward behavior. Replay fine-tuning
+        can tighten the ignoring-hazard gate without changing the observation
+        semantics by overriding the ignoring_* settings.
+        """
+        self.early_reaction_threshold = early_reaction_threshold
+        self.ignoring_hazard_threshold = ignoring_hazard_threshold
+        self.ignoring_require_danger_geometry = (
+            ignoring_require_danger_geometry
+        )
+        self.ignoring_danger_distance = ignoring_danger_distance
+        self.ignoring_danger_closing_rate = ignoring_danger_closing_rate
+        self.ignoring_use_any_braking_peer = ignoring_use_any_braking_peer
+
     def _safety_reward(self, distance: float) -> float:
         """Calculate safety reward with continuous linear ramp."""
         if distance < self.COLLISION_DIST:
@@ -127,6 +152,15 @@ class RewardCalculator:
 
         return 0.0
 
+    def _danger_geometry_active(self, distance: float, closing_rate: float) -> bool:
+        """Whether current geometry warrants a replay-side ignoring penalty."""
+        if not self.ignoring_require_danger_geometry:
+            return True
+        return (
+            closing_rate > self.ignoring_danger_closing_rate
+            or distance < self.ignoring_danger_distance
+        )
+
     def calculate(
         self,
         distance: float,
@@ -156,19 +190,37 @@ class RewardCalculator:
         early_reaction = 0.0
         ignoring_hazard = 0.0
         ignoring_penalty_suppressed_for_stop = False
+        early_reaction_gate_active = (
+            braking_received > self.early_reaction_threshold
+        )
+        ignoring_signal_active = (
+            braking_received >= self.ignoring_hazard_threshold
+        )
+        ignoring_signal_strength = braking_received
 
-        if braking_received > 0.01:
-            decel_abs = abs(deceleration)
-            is_braking = decel_abs > self.GENTLE_DECEL_THRESHOLD
-            is_stopped = ego_speed <= self.STOPPED_SPEED_THRESHOLD
+        if self.ignoring_use_any_braking_peer and any_braking_peer:
+            ignoring_signal_active = True
+            ignoring_signal_strength = max(ignoring_signal_strength, 1.0)
 
-            if not is_braking:
-                if is_stopped:
-                    ignoring_penalty_suppressed_for_stop = True
-                else:
-                    ignoring_hazard = self.PENALTY_IGNORING_HAZARD * braking_received
-            elif distance > self.EARLY_REACTION_DIST:
-                early_reaction = self.REWARD_EARLY_REACTION * braking_received
+        ignoring_geometry_active = self._danger_geometry_active(
+            distance=distance,
+            closing_rate=closing_rate,
+        )
+
+        decel_abs = abs(deceleration)
+        is_braking = decel_abs > self.GENTLE_DECEL_THRESHOLD
+        is_stopped = ego_speed <= self.STOPPED_SPEED_THRESHOLD
+
+        if ignoring_signal_active and ignoring_geometry_active and not is_braking:
+            if is_stopped:
+                ignoring_penalty_suppressed_for_stop = True
+            else:
+                ignoring_hazard = (
+                    self.PENALTY_IGNORING_HAZARD * ignoring_signal_strength
+                )
+
+        if early_reaction_gate_active and is_braking and distance > self.EARLY_REACTION_DIST:
+            early_reaction = self.REWARD_EARLY_REACTION * braking_received
 
         total = (
             safety + comfort + appropriateness
@@ -190,6 +242,10 @@ class RewardCalculator:
             "braking_received": braking_received,
             "ego_speed": ego_speed,
             "ignoring_penalty_suppressed_for_stop": ignoring_penalty_suppressed_for_stop,
+            "early_reaction_gate_active": early_reaction_gate_active,
+            "ignoring_signal_active": ignoring_signal_active,
+            "ignoring_signal_strength": ignoring_signal_strength,
+            "ignoring_geometry_active": ignoring_geometry_active,
         }
 
         return total, info

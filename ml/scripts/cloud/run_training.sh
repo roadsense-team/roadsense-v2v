@@ -1,33 +1,32 @@
 #!/bin/bash
 # =============================================================================
-# RoadSense Training Run 023 - State-Triggered Onset + max_closing_speed (2M)
+# RoadSense Training Run 025 - Temporal Ego Stack (2M)
 # =============================================================================
 # Paste this into EC2 User Data when launching from the roadsense-training AMI.
 #
 # BEFORE LAUNCHING - customize these variables:
 #   RUN_ID        - Unique run identifier
 #   GITHUB_PAT    - Your GitHub Personal Access Token
-#   TOTAL_STEPS   - Training timesteps (default: 2000000 for diagnostic run)
+#   TOTAL_STEPS   - Training timesteps (default: 2000000)
 #   S3_BUCKET     - S3 bucket for results
 #
-# Run 023 — H1 + H2: state-triggered hazard onset + max_closing_speed feature.
+# Run 025 — Temporal ego frame stacking to break the discrimination ceiling.
 #
-#   Why Run 023 exists:
-#     - Run 022 fixed FP (heading removal) but sensitivity still failed:
-#       Recording #2: 12%, Extra Driving: 26.1%.
-#     - H1: hazards begin from narrow relative convoy states. Broadening
-#       onset geometry via state-triggered hazard injection.
-#     - H2: observation lacks explicit closing-risk signal after heading
-#       removal. Added max_closing_speed to ego observation.
+#   Why Run 025 exists:
+#     - Run 024 (all variants v3-v6) hit a discrimination ceiling:
+#       the model cannot distinguish hazard onset from stale braking
+#       decay using a single-timestep observation.
+#     - v3: 72% det / 68% FP | v5: 32% / 16.6% — Pareto stalled.
+#     - Root cause: single-frame ego lacks temporal context.
 #
-#   Run 023 changes:
-#     1. HazardInjector: state_bucket trigger mode for training episodes.
-#        Waits for sampled rank/gap onset bucket before injecting hazard.
-#     2. ObservationBuilder: ego 5→6 dims (added max_closing_speed/30).
-#        Deep Sets features_dim: 37→38 (32 embed + 6 ego).
-#     3. Replay validator: V001 self-RX filtering (hygiene fix).
+#   Run 025 changes:
+#     1. ego_stack_frames=3: ego observation stacks last 3 frames.
+#        [ego_t, ego_{t-1}, ego_{t-2}] → 18-dim (was 6-dim).
+#     2. DeepSetExtractor features_dim: 38→50 (32 embed + 18 ego).
+#     3. Fresh SUMO training — no weight transfer from Run 023
+#        (obs dim change breaks checkpoint compatibility).
 #
-#   Everything else unchanged from Run 022:
+#   Everything else unchanged from Run 023:
 #     - base_real road and route grounding
 #     - Heading-free observation (ego heading still removed)
 #     - Hazard decel randomization: uniform [3.0, 10.0] m/s²
@@ -39,35 +38,25 @@
 #     - BRAKING_DURATION 0.5-1.5s (keeps signal sharp)
 #     - Dataset: base_real, seed=42, 25 train + 40 eval
 #
-#   This is a 2M DIAGNOSTIC run.  Kill criteria:
-#     - explained_variance must exceed 0.1 by 500k steps
-#     - V2V reaction at 2M must exceed 50%
-#     - fallback trigger rate > 35%
-#
 #   Diagnostic success targets:
-#     - weighted SUMO V2V reaction > 75%
+#     - SUMO V2V reaction >= Run 023 (~85%)
 #     - 0% collisions
-#     - fallback trigger rate <= 20%
-#
-#   Acceptance gates (MANDATORY before 10M promotion):
-#     - SUMO eval: >90% V2V reaction, 0% collisions
-#     - Real-data replay (Recording #2): sensitivity >60%, FP <15%
-#     - Real-data replay (Extra Driving): sensitivity >75%, FP <20%
-#     - Replay validation runs LOCALLY after downloading model from S3
+#     - After replay fine-tune: >40% detection AND <15% FP on Recording #2
 # =============================================================================
 exec > /var/log/training-run.log 2>&1
 
 # ===================== CUSTOMIZE THESE =====================
-RUN_ID="cloud_prod_023"
+RUN_ID="cloud_prod_025"
 GITHUB_PAT="<YOUR_PAT_HERE>"
 TOTAL_STEPS=2000000
 S3_BUCKET="saferide-training-results"
+EGO_STACK_FRAMES=3
 # ===========================================================
 
 export AWS_DEFAULT_REGION=il-central-1
 export AWS_REGION="$AWS_DEFAULT_REGION"
 WORK_DIR="/home/ubuntu/work"
-DATASET_DIR="ml/scenarios/datasets/dataset_v13_run023"
+DATASET_DIR="ml/scenarios/datasets/dataset_v14_run025"
 EMULATOR_PARAMS="ml/espnow_emulator/emulator_params_measured.json"
 
 # -------------------------------------------------------------------
@@ -160,10 +149,11 @@ print('Dataset verification PASSED')
 "
 
 # 6. Train
-# NOTE: eval still uses fixed_step mode (--eval_hazard_step 200) for
-# reproducible comparison with Run 022.  Training uses state_bucket
-# mode (configured in HazardInjector default for this run).
-echo "[6/7] Starting training ($TOTAL_STEPS steps)..."
+# NOTE: eval uses fixed_step mode (--eval_hazard_step 200) for
+# reproducible comparison with earlier runs.  Training uses state_bucket
+# mode (configured in HazardInjector default).
+# Run 025: --ego_stack_frames 3 for temporal ego observation stacking.
+echo "[6/7] Starting training ($TOTAL_STEPS steps, ego_stack=$EGO_STACK_FRAMES)..."
 set +e
 ./ml/run_docker.sh train \
     --dataset_dir "$DATASET_DIR" \
@@ -171,8 +161,8 @@ set +e
     --total_timesteps "$TOTAL_STEPS" \
     --run_id "$RUN_ID" \
     --output_dir /work/results \
+    --ego_stack_frames "$EGO_STACK_FRAMES" \
     --eval_force_hazard \
-    --eval_hazard_step 200 \
     --eval_use_deterministic_matrix \
     --eval_matrix_peer_counts "1,2,3,4,5" \
     --eval_matrix_episodes_per_bucket 10

@@ -1,0 +1,11 @@
+{
+  "run_id": "run_024_replay",
+  "base_model": "ml/models/runs/cloud_prod_023/model_final.zip",
+  "total_timesteps": 50000,
+  "learning_rate": 1e-05,
+  "augment": true,
+  "training_time_s": 57.79350924491882,
+  "seed": 42,
+  "episodes_completed": 0,
+  "final_ep_rew_mean": null
+}

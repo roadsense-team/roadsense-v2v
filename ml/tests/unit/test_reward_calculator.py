@@ -193,6 +193,8 @@ def test_calculate_returns_all_info_fields():
         "distance", "action_value", "deceleration", "closing_rate",
         "any_braking_peer", "braking_received", "ego_speed",
         "ignoring_penalty_suppressed_for_stop",
+        "early_reaction_gate_active", "ignoring_signal_active",
+        "ignoring_signal_strength", "ignoring_geometry_active",
     ]
     for key in required:
         assert key in info
@@ -532,3 +534,112 @@ def test_info_contains_ego_speed_and_braking_received():
     assert "braking_received" in info
     assert info["braking_received"] == pytest.approx(1.0)
     assert "ignoring_penalty_suppressed_for_stop" in info
+
+
+def test_replay_ignore_penalty_requires_danger_geometry_when_configured():
+    calc = RewardCalculator(
+        ignoring_hazard_threshold=0.3,
+        ignoring_require_danger_geometry=True,
+        ignoring_danger_distance=20.0,
+        ignoring_danger_closing_rate=0.5,
+        ignoring_use_any_braking_peer=True,
+    )
+    _, info = calc.calculate(
+        distance=25.0,
+        action_value=0.0,
+        deceleration=0.0,
+        closing_rate=0.0,
+        any_braking_peer=False,
+        braking_received=1.0,
+        ego_speed=5.0,
+    )
+    assert info["ignoring_signal_active"] is True
+    assert info["ignoring_geometry_active"] is False
+    assert info["reward_ignoring_hazard"] == 0.0
+
+
+def test_replay_ignore_penalty_fires_with_strong_signal_and_close_distance():
+    calc = RewardCalculator(
+        ignoring_hazard_threshold=0.3,
+        ignoring_require_danger_geometry=True,
+        ignoring_danger_distance=20.0,
+        ignoring_danger_closing_rate=0.5,
+        ignoring_use_any_braking_peer=True,
+    )
+    _, info = calc.calculate(
+        distance=18.0,
+        action_value=0.0,
+        deceleration=0.0,
+        closing_rate=0.0,
+        any_braking_peer=False,
+        braking_received=0.4,
+        ego_speed=5.0,
+    )
+    assert info["ignoring_geometry_active"] is True
+    assert info["reward_ignoring_hazard"] == pytest.approx(-2.0)
+
+
+def test_replay_ignore_penalty_uses_any_braking_peer_as_fresh_signal():
+    calc = RewardCalculator(
+        ignoring_hazard_threshold=0.3,
+        ignoring_require_danger_geometry=True,
+        ignoring_danger_distance=20.0,
+        ignoring_danger_closing_rate=0.5,
+        ignoring_use_any_braking_peer=True,
+    )
+    _, info = calc.calculate(
+        distance=30.0,
+        action_value=0.0,
+        deceleration=0.0,
+        closing_rate=1.0,
+        any_braking_peer=True,
+        braking_received=0.0,
+        ego_speed=5.0,
+    )
+    assert info["ignoring_signal_active"] is True
+    assert info["ignoring_signal_strength"] == pytest.approx(1.0)
+    assert info["reward_ignoring_hazard"] == pytest.approx(-5.0)
+
+
+def test_replay_ignore_penalty_can_use_closing_rate_without_close_distance():
+    calc = RewardCalculator(
+        ignoring_hazard_threshold=0.3,
+        ignoring_require_danger_geometry=True,
+        ignoring_danger_distance=20.0,
+        ignoring_danger_closing_rate=0.5,
+        ignoring_use_any_braking_peer=True,
+    )
+    _, info = calc.calculate(
+        distance=30.0,
+        action_value=0.0,
+        deceleration=0.0,
+        closing_rate=0.8,
+        any_braking_peer=False,
+        braking_received=0.35,
+        ego_speed=5.0,
+    )
+    assert info["ignoring_geometry_active"] is True
+    assert info["reward_ignoring_hazard"] == pytest.approx(-1.75)
+
+
+def test_replay_early_reaction_stays_loose_when_ignore_threshold_is_tightened():
+    calc = RewardCalculator(
+        early_reaction_threshold=0.01,
+        ignoring_hazard_threshold=0.3,
+        ignoring_require_danger_geometry=True,
+        ignoring_danger_distance=20.0,
+        ignoring_danger_closing_rate=0.5,
+        ignoring_use_any_braking_peer=True,
+    )
+    _, info = calc.calculate(
+        distance=20.0,
+        action_value=0.5,
+        deceleration=4.0,
+        closing_rate=0.0,
+        any_braking_peer=False,
+        braking_received=0.05,
+        ego_speed=10.0,
+    )
+    assert info["early_reaction_gate_active"] is True
+    assert info["reward_early_reaction"] == pytest.approx(0.1)
+    assert info["reward_ignoring_hazard"] == 0.0

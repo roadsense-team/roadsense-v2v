@@ -28,6 +28,7 @@ import csv
 import json
 import math
 import sys
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -261,6 +262,9 @@ def _update_braking_received_decay(
     return current_decay * BRAKING_DECAY
 
 
+EGO_SINGLE_FRAME_DIM = 6
+
+
 def run_replay(
     tx_rows: List[SensorRow],
     rx_rows: List[SensorRow],
@@ -268,11 +272,13 @@ def run_replay(
     output_dir: Path,
     recording_name: str,
     braking_received_mode: str = "decay",
+    ego_stack_frames: int = 1,
 ) -> Dict:
     """
     Replay real data through the model and generate validation report.
     """
     obs_builder = ObservationBuilder()
+    ego_history: deque = deque(maxlen=ego_stack_frames)
 
     # Build time range
     t_start = tx_rows[0].timestamp_local_ms
@@ -359,6 +365,19 @@ def run_replay(
             ego_pos=ego_pos,
             braking_received=braking_received_value,
         )
+
+        # Ego frame stacking (Run 025)
+        single_ego = observation["ego"].copy()
+        if len(ego_history) == 0:
+            # First step: fill deque with N copies
+            for _ in range(ego_stack_frames):
+                ego_history.append(single_ego.copy())
+        else:
+            ego_history.append(single_ego)
+        if ego_stack_frames > 1:
+            observation["ego"] = np.concatenate(
+                list(reversed(ego_history)), dtype=np.float32
+            )
 
         # Model inference
         action, _ = model.predict(observation, deterministic=True)
@@ -490,6 +509,7 @@ def run_replay(
         "model_action_threshold": MODEL_ACTION_THRESHOLD,
         "max_decel_ms2": MAX_DECEL,
         "braking_received_mode": braking_received_mode,
+        "ego_stack_frames": ego_stack_frames,
     }
 
     # Save results
@@ -589,6 +609,13 @@ def main():
              "with factor 0.95/step. 'latched'/'instant'/'off' kept for "
              "regression analysis against earlier runs.",
     )
+    parser.add_argument(
+        "--ego_stack_frames",
+        type=int,
+        default=1,
+        help="Number of ego observation frames to stack (Run 025). "
+             "Default 1 = no stacking. Use 3 for temporal context.",
+    )
     args = parser.parse_args()
 
     # Validate inputs
@@ -612,6 +639,7 @@ def main():
     print(f"  Peers: {sorted(unique_peers)}")
 
     print(f"Braking signal mode: {args.braking_received_mode}")
+    print(f"Ego stack frames: {args.ego_stack_frames}")
 
     print(f"Loading model: {args.model_path}")
     from stable_baselines3 import PPO
@@ -621,6 +649,7 @@ def main():
     report = run_replay(
         tx_rows, rx_rows, model, args.output_dir, recording_name,
         braking_received_mode=args.braking_received_mode,
+        ego_stack_frames=args.ego_stack_frames,
     )
     print_report(report)
 

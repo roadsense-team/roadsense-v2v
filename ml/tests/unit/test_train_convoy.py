@@ -76,6 +76,7 @@ def _make_args(**overrides):
         learning_rate=1e-4,
         n_steps=32,
         ent_coef=0.0,
+        ego_stack_frames=1,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
