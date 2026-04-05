@@ -51,7 +51,10 @@ from ml.envs.sumo_connection import VehicleState
 METERS_PER_DEG_LAT = 111_000.0  # Same as ESPNOWEmulator.METERS_PER_DEG_LAT
 STEP_MS = 100  # 10 Hz replay rate (matches sensor broadcast rate)
 STALENESS_THRESHOLD_MS = 500.0
-BRAKING_THRESHOLD_MS2 = -1.0  # accel below this = braking event (analysis)
+BRAKING_THRESHOLD_MS2 = -5.0  # accel below this = braking event (analysis)
+                              # Changed from -1.0 (March 25, 2026): -1.0 caught speed
+                              # bump noise (25 events). -5.0 isolates real hazard braking
+                              # (3 events in Recording #2).
 V2V_BRAKING_ACCEL_THRESHOLD = -2.5  # matches ConvoyEnv.BRAKING_ACCEL_THRESHOLD
 BRAKING_DECAY = 0.95  # matches ConvoyEnv.BRAKING_DECAY
 MODEL_ACTION_THRESHOLD = 0.1  # model action above this = model brakes
@@ -273,6 +276,7 @@ def run_replay(
     recording_name: str,
     braking_received_mode: str = "decay",
     ego_stack_frames: int = 1,
+    braking_threshold: float = BRAKING_THRESHOLD_MS2,
 ) -> Dict:
     """
     Replay real data through the model and generate validation report.
@@ -412,7 +416,7 @@ def run_replay(
     peer_count = np.array(results["peer_count"])
 
     # Detect real braking events
-    braking_events = detect_braking_events(tx_rows)
+    braking_events = detect_braking_events(tx_rows, threshold=braking_threshold)
 
     # Model braking episodes (action > threshold)
     model_braking_mask = model_action > MODEL_ACTION_THRESHOLD
@@ -422,9 +426,15 @@ def run_replay(
     pct_time_with_peers = float(np.mean(has_peers_mask)) * 100
 
     # Braking correlation: during real braking events, does model brake?
+    # The model reacts to PEER V2V signals, which arrive before the ego
+    # itself brakes. A lead window captures early reactions.
+    EVENT_LEAD_MS = 5000   # check 5s before ego braking for early V2V reaction
+    EVENT_TRAIL_MS = 5000  # check 5s after ego braking ends
     event_analysis = []
     for evt in braking_events:
-        mask = (timestamps >= evt["start_ms"]) & (timestamps <= evt["end_ms"])
+        detect_start = evt["start_ms"] - EVENT_LEAD_MS
+        detect_end = evt["end_ms"] + EVENT_TRAIL_MS
+        mask = (timestamps >= detect_start) & (timestamps <= detect_end)
         if np.sum(mask) == 0:
             continue
 
@@ -435,6 +445,7 @@ def run_replay(
         max_model_decel = max_model_action * MAX_DECEL
 
         # Reaction time: time from event start to first model action > threshold
+        # Negative = model reacted before ego started braking (early V2V warning)
         reaction_time_ms = None
         if model_reacted:
             evt_timestamps = timestamps[mask]
@@ -457,10 +468,12 @@ def run_replay(
         })
 
     # False positive analysis: model brakes when real driver didn't
-    # (outside braking events, with peers visible)
+    # (outside braking events + lead/trail windows, with peers visible)
     outside_events_mask = np.ones(len(timestamps), dtype=bool)
     for evt in braking_events:
-        outside_events_mask &= ~((timestamps >= evt["start_ms"]) & (timestamps <= evt["end_ms"]))
+        evt_zone_start = evt["start_ms"] - EVENT_LEAD_MS
+        evt_zone_end = evt["end_ms"] + EVENT_TRAIL_MS
+        outside_events_mask &= ~((timestamps >= evt_zone_start) & (timestamps <= evt_zone_end))
 
     calm_with_peers = outside_events_mask & has_peers_mask
     if np.sum(calm_with_peers) > 0:
@@ -616,6 +629,21 @@ def main():
         help="Number of ego observation frames to stack (Run 025). "
              "Default 1 = no stacking. Use 3 for temporal context.",
     )
+    parser.add_argument(
+        "--braking_threshold",
+        type=float,
+        default=BRAKING_THRESHOLD_MS2,
+        help="Accel threshold (m/s²) for detecting real braking events. "
+             f"Default {BRAKING_THRESHOLD_MS2}. Use -1.0 for legacy behavior "
+             "(catches bump noise). Use -5.0 for real hazard events only.",
+    )
+    parser.add_argument(
+        "--ego_vehicle_id",
+        type=str,
+        default="V001",
+        help="Vehicle ID to filter TX rows for ego braking detection. "
+             "TX files may contain interleaved ego + relayed peer data.",
+    )
     args = parser.parse_args()
 
     # Validate inputs
@@ -629,8 +657,19 @@ def main():
         recording_name = args.tx_csv.parent.name
 
     print(f"Loading TX: {args.tx_csv}")
-    tx_rows = parse_csv(args.tx_csv, args.forward_axis)
-    print(f"  {len(tx_rows)} rows, {(tx_rows[-1].timestamp_local_ms - tx_rows[0].timestamp_local_ms) / 1000:.1f}s")
+    tx_rows_all = parse_csv(args.tx_csv, args.forward_axis)
+    print(f"  {len(tx_rows_all)} rows (all vehicles), {(tx_rows_all[-1].timestamp_local_ms - tx_rows_all[0].timestamp_local_ms) / 1000:.1f}s")
+
+    # Filter TX rows for ego vehicle only — TX files contain interleaved
+    # ego + relayed peer data (e.g. V001=1956, V002=1609, V003=1419 rows).
+    tx_rows = [r for r in tx_rows_all if r.vehicle_id == args.ego_vehicle_id]
+    if not tx_rows:
+        print(f"  WARNING: No TX rows for vehicle '{args.ego_vehicle_id}', using all rows")
+        tx_rows = tx_rows_all
+    else:
+        print(f"  Filtered to {len(tx_rows)} ego rows ({args.ego_vehicle_id}), "
+              f"{(tx_rows[-1].timestamp_local_ms - tx_rows[0].timestamp_local_ms) / 1000:.1f}s")
+    print(f"  Braking detection threshold: {args.braking_threshold} m/s²")
 
     print(f"Loading RX: {args.rx_csv}")
     rx_rows = parse_csv(args.rx_csv, args.forward_axis)
@@ -650,6 +689,7 @@ def main():
         tx_rows, rx_rows, model, args.output_dir, recording_name,
         braking_received_mode=args.braking_received_mode,
         ego_stack_frames=args.ego_stack_frames,
+        braking_threshold=args.braking_threshold,
     )
     print_report(report)
 

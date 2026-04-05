@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-03-01 03:13:12 by Eclipse SUMO netconvert Version 1.22.0
+<netconvertConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/netconvertConfiguration.xsd">
+
+    <input>
+        <osm-files value="ml/scenarios/base_real/map.osm"/>
+    </input>
+
+    <output>
+        <output-file value="ml/scenarios/base_real/network.net.xml"/>
+    </output>
+
+    <projection>
+        <proj.utm value="true"/>
+    </projection>
+
+    <processing>
+        <geometry.remove value="true"/>
+    </processing>
+
+    <tls_building>
+        <tls.discard-simple value="true"/>
+        <tls.join value="true"/>
+        <tls.guess-signals value="true"/>
+    </tls_building>
+
+    <ramp_guessing>
+        <ramps.guess value="true"/>
+    </ramp_guessing>
+
+    <junctions>
+        <junctions.join value="true"/>
+    </junctions>
+
+</netconvertConfiguration>
+-->
+
+<net version="1.20" junctionCornerDetail="5" limitTurnSpeed="5.50" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+
+    <location netOffset="-724677.63,-3637826.63" convBoundary="0.00,0.00,426.76,634.23" origBoundary="35.401091,32.855448,35.447142,32.868631" projParameter="+proj=utm +zone=36 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"/>
+
+    <type id="highway.unclassified" priority="4" numLanes="1" speed="13.89" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" oneway="0"/>
+
+    <edge id=":712646053_0" function="internal">
+        <lane id=":712646053_0_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="3.65" length="4.67" shape="0.70,635.68 -0.73,635.48 -1.44,634.93 -1.43,634.04 -0.70,632.79"/>
+    </edge>
+    <edge id=":712647021_0" function="internal">
+        <lane id=":712647021_0_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="3.65" length="4.67" shape="425.27,-0.57 426.44,-1.41 427.33,-1.50 427.94,-0.84 428.26,0.57"/>
+    </edge>
+
+    <edge id="-635191227" from="712646053" to="712647021" priority="4" type="highway.unclassified" shape="0.00,634.23 25.26,622.03 72.08,587.95 275.28,382.87 303.74,325.83 426.76,0.00">
+        <lane id="-635191227_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="13.89" length="785.47" shape="-0.70,632.79 24.44,620.65 71.04,586.74 273.96,381.93 302.27,325.18 425.27,-0.57"/>
+    </edge>
+    <edge id="635191227" from="712647021" to="712646053" priority="4" type="highway.unclassified" shape="426.76,0.00 303.74,325.83 275.28,382.87 72.08,587.95 25.26,622.03 0.00,634.23">
+        <lane id="635191227_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="13.89" length="787.91" shape="428.26,0.57 305.21,326.47 276.60,383.82 73.13,589.17 26.09,623.41 0.70,635.68"/>
+    </edge>
+
+    <junction id="712646053" type="priority" x="0.00" y="634.23" incLanes="635191227_0" intLanes=":712646053_0_0" shape="-0.00,634.23 1.39,637.12 -0.00,634.23">
+        <request index="0" response="0" foes="0" cont="0"/>
+    </junction>
+    <junction id="712647021" type="priority" x="426.76" y="0.00" incLanes="-635191227_0" intLanes=":712647021_0_0" shape="426.76,-0.00 423.77,-1.13 426.76,0.00">
+        <request index="0" response="0" foes="0" cont="0"/>
+    </junction>
+
+    <connection from="-635191227" to="635191227" fromLane="0" toLane="0" via=":712647021_0_0" dir="t" state="M"/>
+    <connection from="635191227" to="-635191227" fromLane="0" toLane="0" via=":712646053_0_0" dir="t" state="M"/>
+
+    <connection from=":712646053_0" to="-635191227" fromLane="0" toLane="0" dir="t" state="M"/>
+    <connection from=":712647021_0" to="635191227" fromLane="0" toLane="0" dir="t" state="M"/>
+
+</net>

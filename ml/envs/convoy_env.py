@@ -56,6 +56,7 @@ class ConvoyEnv(gym.Env):
         render_mode: Optional[str] = None,
         gui: bool = False,
         ego_stack_frames: int = 1,
+        cone_half_angle_deg: float = 45.0,
     ) -> None:
         super().__init__()
 
@@ -98,6 +99,7 @@ class ConvoyEnv(gym.Env):
         else:
             self.emulator = ESPNOWEmulator()
 
+        self.cone_half_angle_deg = cone_half_angle_deg
         self.obs_builder = ObservationBuilder()
         self.action_applicator = ActionApplicator()
         self.reward_calculator = RewardCalculator()
@@ -540,6 +542,7 @@ class ConvoyEnv(gym.Env):
             vehicle_states=vehicle_states,
             ego_id=self.EGO_VEHICLE_ID,
             current_time_ms=current_time_ms,
+            cone_half_angle_deg=self.cone_half_angle_deg,
         )
 
         meters_per_deg = ESPNOWEmulator.METERS_PER_DEG_LAT
@@ -587,6 +590,7 @@ class ConvoyEnv(gym.Env):
             ego_heading_deg=ego_state.heading,
             ego_pos=ego_pos,
             peer_observations=peer_observations,
+            half_angle_deg=self.cone_half_angle_deg,
         )
         any_braking_peer_received = any(
             float(peer["accel"]) <= self.BRAKING_ACCEL_THRESHOLD
@@ -604,6 +608,7 @@ class ConvoyEnv(gym.Env):
             peer_observations=peer_observations,
             ego_pos=ego_pos,
             braking_received=self._braking_received_decay,
+            half_angle_deg=self.cone_half_angle_deg,
         )
 
         return (

@@ -60,13 +60,15 @@ class ObservationBuilder:
         ego_heading_deg: float,
         ego_pos: Tuple[float, float],
         peer_observations: List[Dict[str, float]],
+        half_angle_deg: float = 45.0,
     ) -> List[Dict[str, float]]:
         """Return the valid peer observations that survive ego cone filtering."""
         filtered_peers = []
         for peer in peer_observations:
             if not peer.get("valid", True):
                 continue
-            if self.is_in_cone(ego_heading_deg, ego_pos, peer["x"], peer["y"]):
+            if self.is_in_cone(ego_heading_deg, ego_pos, peer["x"], peer["y"],
+                               half_angle_deg=half_angle_deg):
                 filtered_peers.append(peer)
         return filtered_peers
 
@@ -76,6 +78,7 @@ class ObservationBuilder:
         peer_observations: List[Dict[str, float]],
         ego_pos: Tuple[float, float],
         braking_received: float = 0.0,
+        half_angle_deg: float = 45.0,
     ) -> Dict[str, np.ndarray]:
         """
         Build observation dict from ego state and variable peer list.
@@ -83,6 +86,7 @@ class ObservationBuilder:
         Args:
             braking_received: exponential-decay braking signal in [0, 1].
                 1.0 = peer hard-braking this step, decays by 0.95/step.
+            half_angle_deg: cone half-angle for filtering peers.
 
         Returns:
             Dict with 'ego', 'peers', and 'peer_mask' arrays
@@ -93,6 +97,7 @@ class ObservationBuilder:
             ego_heading_deg=ego_heading_deg,
             ego_pos=ego_pos,
             peer_observations=peer_observations,
+            half_angle_deg=half_angle_deg,
         )
 
         peers = np.zeros((self.MAX_PEERS, 6), dtype=np.float32)
