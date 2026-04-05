@@ -1,0 +1,92 @@
+{
+  "recording": "recording_02_fixed",
+  "duration_s": 195.5,
+  "total_steps": 1956,
+  "step_interval_ms": 100,
+  "pct_time_with_peers": 96.5,
+  "real_braking_events": 3,
+  "braking_events_detail": [
+    {
+      "start_ms": 188073,
+      "end_ms": 188373,
+      "duration_ms": 300,
+      "real_min_accel": -5.75,
+      "real_avg_accel": -5.666666666666667,
+      "model_reacted": true,
+      "max_model_action": 0.8718680739402771,
+      "max_model_decel_ms2": 6.974944591522217,
+      "reaction_time_ms": -2300,
+      "avg_peers_visible": 2.0
+    },
+    {
+      "start_ms": 220173,
+      "end_ms": 220673,
+      "duration_ms": 500,
+      "real_min_accel": -7.91,
+      "real_avg_accel": -6.659999999999999,
+      "model_reacted": true,
+      "max_model_action": 1.0,
+      "max_model_decel_ms2": 8.0,
+      "reaction_time_ms": -3600,
+      "avg_peers_visible": 1.8962264150943395
+    },
+    {
+      "start_ms": 234873,
+      "end_ms": 237272,
+      "duration_ms": 2399,
+      "real_min_accel": -8.63,
+      "real_avg_accel": -6.4675,
+      "model_reacted": true,
+      "max_model_action": 1.0,
+      "max_model_decel_ms2": 8.0,
+      "reaction_time_ms": -2300,
+      "avg_peers_visible": 2.0
+    }
+  ],
+  "sensitivity": {
+    "events_detected": 3,
+    "events_total": 3,
+    "detection_rate": 1.0
+  },
+  "specificity": {
+    "false_positive_rate": 0.1153,
+    "avg_calm_action": 0.0415,
+    "max_calm_action": 1.0,
+    "calm_steps_with_peers": 1553
+  },
+  "action_distribution": {
+    "histogram_counts": [
+      1715,
+      79,
+      43,
+      29,
+      32,
+      15,
+      14,
+      16,
+      6,
+      7
+    ],
+    "bin_edges": [
+      0.0,
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      0.5,
+      0.6,
+      0.7,
+      0.8,
+      0.9,
+      1.0
+    ],
+    "mean": 0.0468,
+    "std": 0.1452,
+    "median": 0.0,
+    "pct_above_threshold": 12.3
+  },
+  "model_action_threshold": 0.1,
+  "max_decel_ms2": 8.0,
+  "braking_received_mode": "decay",
+  "ego_stack_frames": 3
+}

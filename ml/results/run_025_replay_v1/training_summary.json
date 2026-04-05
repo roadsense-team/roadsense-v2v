@@ -1,0 +1,25 @@
+{
+  "run_id": "run_024_replay",
+  "base_model": "ml/models/runs/cloud_prod_025/model_final.zip",
+  "total_timesteps": 1000000,
+  "learning_rate": 0.0001,
+  "final_learning_rate": 1e-05,
+  "augment": true,
+  "use_recorded_ego": true,
+  "use_shadow_reward_geometry": false,
+  "random_start": true,
+  "reset_log_std": -1.0,
+  "reward_config": {
+    "ignoring_hazard_threshold": 0.15,
+    "ignoring_danger_distance": 20.0,
+    "ignoring_danger_closing_rate": 0.5,
+    "ignoring_require_danger_geometry": false,
+    "ignoring_use_any_braking_peer": true,
+    "early_reaction_threshold": 0.01
+  },
+  "training_time_s": 1160.2929320335388,
+  "seed": 42,
+  "ego_stack_frames": 3,
+  "episodes_completed": 2007,
+  "final_ep_rew_mean": -1870.3096332399998
+}

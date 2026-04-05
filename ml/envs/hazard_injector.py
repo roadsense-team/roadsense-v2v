@@ -428,6 +428,19 @@ class HazardInjector:
 
         front_peers_with_rank = self._front_peers_with_rank(sumo)
         target, source_rank_ahead = self._select_target(front_peers_with_rank)
+
+        # Fallback for fixed_vehicle_id on curved roads: the heading-based
+        # front-peer filter may exclude the target when it's around a bend.
+        # If the vehicle is explicitly named and active in SUMO, inject anyway.
+        if (
+            target is None
+            and self._target_strategy == self.TARGET_STRATEGY_FIXED_VEHICLE_ID
+            and self._fixed_vehicle_id
+            and sumo.is_vehicle_active(self._fixed_vehicle_id)
+        ):
+            target = self._fixed_vehicle_id
+            source_rank_ahead = len(front_peers_with_rank) + 1
+
         if target is None or source_rank_ahead is None:
             self._hazard_injection_failed = True
             if not front_peers_with_rank:
