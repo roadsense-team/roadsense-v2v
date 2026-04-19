@@ -1,0 +1,14 @@
+{
+  "model_zip": "ml/results/run_025_replay_v1/model_final.zip",
+  "ego_dim": 18,
+  "peer_feature_dim": 6,
+  "embed_dim": 32,
+  "max_peers": 8,
+  "policy_hidden_1": 64,
+  "policy_hidden_2": 64,
+  "action_dim": 1,
+  "action_low": 0.0,
+  "action_high": 1.0,
+  "peer_enc_activation": "relu",
+  "policy_activation": "tanh"
+}

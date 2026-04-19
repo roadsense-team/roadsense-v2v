@@ -23,6 +23,8 @@
 #include "network/mesh/PackageManager.h"
 #include "network/mesh/MeshRelayPolicy.h"
 #include "inference/ConeFilter.h"
+#include "inference/ModelRunner.h"
+#include "inference/ObservationBuilder.h"
 #include "logging/DataLogger.h"
 #include "utils/MACHelper.h"
 
@@ -41,6 +43,12 @@ DataLogger dataLogger;
 PackageManager packageManager;
 bool magInitialized = false;
 SemaphoreHandle_t packageManagerMutex = nullptr;
+
+// ML inference
+static ModelRunner        g_runner;
+static ObservationBuilder g_obs;
+static uint8_t            g_ownMAC[6];
+static float              g_lastAction = 0.0f;  // braking signal [0, 1]
 
 // Timer variables
 uint32_t lastBroadcastTime = 0;
@@ -70,7 +78,15 @@ void unlockPackageManager() {
 }
 
 /**
- * @brief Update LED based on system state
+ * @brief Update LED based on system state and ML braking signal.
+ *
+ * Priority (high → low):
+ *   - Logging active         → solid ON
+ *   - No GPS fix             → fast blink 200 ms
+ *   - High risk   (≥ 0.7)   → very fast blink 100 ms
+ *   - Medium risk (≥ 0.4)   → fast blink 300 ms
+ *   - Low risk    (> 0.1)   → slow blink 1000 ms
+ *   - Idle                  → OFF
  */
 void updateLED() {
     static uint32_t lastLedToggle = 0;
@@ -80,17 +96,36 @@ void updateLED() {
     auto gpsData = gps.read();
 
     if (dataLogger.isLogging()) {
-        // Solid ON when logging
         digitalWrite(LED_STATUS_PIN, HIGH);
-    } else if (!gpsData.valid && !gpsData.cached) {
-        // Fast blink when waiting for GPS fix (200ms)
+        return;
+    }
+
+    if (!gpsData.valid && !gpsData.cached) {
         if (now - lastLedToggle >= 200) {
             ledState = !ledState;
             digitalWrite(LED_STATUS_PIN, ledState);
             lastLedToggle = now;
         }
+        return;
+    }
+
+    // ML risk blink
+    uint32_t blinkMs = 0;
+    if (g_lastAction >= 0.7f) {
+        blinkMs = LED_BLINK_HIGH_RISK;    // 100 ms
+    } else if (g_lastAction >= 0.4f) {
+        blinkMs = LED_BLINK_MEDIUM_RISK;  // 300 ms
+    } else if (g_lastAction > 0.1f) {
+        blinkMs = LED_BLINK_LOW_RISK;     // 1000 ms
+    }
+
+    if (blinkMs > 0) {
+        if (now - lastLedToggle >= blinkMs) {
+            ledState = !ledState;
+            digitalWrite(LED_STATUS_PIN, ledState);
+            lastLedToggle = now;
+        }
     } else {
-        // OFF when not logging and GPS ready
         digitalWrite(LED_STATUS_PIN, LOW);
     }
 }
@@ -171,8 +206,8 @@ V2VMessage buildV2VMessage() {
         memset(msg.sensors.mag, 0, sizeof(float) * 3);
     }
     
-    // Hazard Alert (Placeholder / Future ML)
-    msg.alert.riskLevel = 0; // None
+    // Hazard Alert — populated by ML inference in the loop (see g_lastAction)
+    msg.alert.riskLevel = 0;
     msg.alert.scenarioType = 0;
     msg.alert.confidence = 0.0f;
     
@@ -330,7 +365,16 @@ void setup() {
     transport.onReceive(onDataReceived);
     log.info("MAIN", "✅ Network Initialized (ESP-NOW)");
 
-    // 4. Initialize DataLogger
+    // 4. Initialize ML inference
+    WiFi.macAddress(g_ownMAC);
+    g_obs.reset();
+    if (!g_runner.begin()) {
+        log.error("MAIN", "❌ ModelRunner init FAILED!");
+    } else {
+        log.info("MAIN", "✅ ModelRunner Ready (TFLite Micro)");
+    }
+
+    // 6. Initialize DataLogger
     log.info("MAIN", "Initializing SD Card...");
     if (!dataLogger.begin()) {
         log.error("MAIN", "❌ SD Card Initialization FAILED!");
@@ -362,15 +406,39 @@ void loop() {
     gps.update(); // Drains UART buffer
     // imu.update() is not needed, we poll via read()
 
-    // 4. Broadcast V2V Message (10 Hz) + Log TX if active
+    // 4. Broadcast V2V Message + ML inference (10 Hz)
     if (now - lastBroadcastTime >= 100) {
         V2VMessage msg = buildV2VMessage();
+
+        // Run ML inference with current ego + peer observations
+        if (lockPackageManager(pdMS_TO_TICKS(5))) {
+            g_obs.update(msg, packageManager, g_ownMAC);
+            unlockPackageManager();
+        }
+
+        g_lastAction = g_runner.infer(
+            g_obs.ego(),
+            reinterpret_cast<const float(*)[kPeerFeatureDim]>(g_obs.peers()),
+            g_obs.peerMask()
+        );
+
+        // Encode braking signal in alert fields so peers receive it
+        // riskLevel: 0 = safe, 1 = low, 2 = medium, 3 = high
+        if (g_lastAction >= 0.7f) {
+            msg.alert.riskLevel = 3;
+        } else if (g_lastAction >= 0.4f) {
+            msg.alert.riskLevel = 2;
+        } else if (g_lastAction > 0.1f) {
+            msg.alert.riskLevel = 1;
+        } else {
+            msg.alert.riskLevel = 0;
+        }
+        msg.alert.confidence = g_lastAction;
 
         // Send broadcast (to FF:FF:FF:FF:FF:FF)
         bool success = transport.send((uint8_t*)&msg, sizeof(msg));
 
-        // Log transmitted message ONLY if send succeeded (Mode 1: Network Characterization)
-        // This ensures TX log reflects actual transmitted packets, not failed attempts
+        // Log transmitted message ONLY if send succeeded
         if (success && dataLogger.isLogging()) {
             dataLogger.logTxMessage(msg);
         }
@@ -417,6 +485,8 @@ void loop() {
         } else {
             statusMsg += " | ⏸ Not logging";
         }
+
+        statusMsg += " | ML: " + String(g_lastAction, 3);
 
         Logger::getInstance().info("STATUS", statusMsg);
 
