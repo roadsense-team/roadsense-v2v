@@ -1,0 +1,37 @@
+<routes>
+  <!-- Single-lane convoy: no lane changes, no overtaking -->
+  <vType id="car" accel="2.6" decel="10.0" emergencyDecel="20.0" sigma="0.0" length="5" maxSpeed="50"
+         tau="1.000" speedFactor="1.0" speedDev="0"
+         lcStrategic="0.0" lcCooperative="0.0" lcSpeedGain="0.0" lcKeepRight="0.0">
+    <param key="has.ssm.device" value="true" />
+    <param key="device.ssm.measures" value="TTC DRAC PET" />
+    <param key="device.ssm.thresholds" value="4.0 3.4 2.0" />
+    <param key="device.ssm.range" value="100.0" />
+    <param key="device.ssm.file" value="ssm_output.xml" />
+  </vType>
+
+  <!-- Route: all 3 segments of Road 784, north to south through the hairpin curve -->
+  <route id="convoy_route" edges="636924784#0 636924784#1 636924784#2" />
+
+  <!-- === Blind Curve Mesh Proof Scenario (4-Vehicle) ===
+       Same geometry as base_curve, but with one more lead vehicle to force a longer
+       relay chain while keeping 30 m per-hop spacing:
+         V004 -> V003 -> V002 -> V001
+       At hazard time, the direct source-to-ego path is much longer than one hop,
+       while each immediate neighbor link remains short enough for mesh forwarding.
+       Use this scenario to prove mesh relay; keep the original base_curve scenario
+       for the previously validated 3-vehicle RL demo. -->
+
+  <!-- V004: Lead vehicle — emergency brakes in/past curve -->
+  <vehicle id="V004" type="car" depart="0" route="convoy_route"
+           departSpeed="13.000" departPos="782.000" departLane="0" color="1,0.5,0" />
+  <!-- V003: relays V004's braking signal forward -->
+  <vehicle id="V003" type="car" depart="0" route="convoy_route"
+           departSpeed="13.000" departPos="752.000" departLane="0" color="1,0,0" />
+  <!-- V002: relays V003/V004 braking signal to ego -->
+  <vehicle id="V002" type="car" depart="0" route="convoy_route"
+           departSpeed="13.000" departPos="722.000" departLane="0" color="0,1,0" />
+  <!-- V001: Ego vehicle — receives the relayed warning -->
+  <vehicle id="V001" type="car" depart="0" route="convoy_route"
+           departSpeed="13.000" departPos="692.000" departLane="0" color="0,0,1" />
+</routes>

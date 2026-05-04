@@ -1,0 +1,32 @@
+<routes>
+  <vType id="car" accel="2.6" decel="10.0" emergencyDecel="20.0" sigma="0.0" length="5" maxSpeed="50"
+         tau="1.000" speedFactor="1.0" speedDev="0"
+         lcStrategic="0.0" lcCooperative="0.0" lcSpeedGain="0.0" lcKeepRight="0.0">
+    <param key="has.ssm.device" value="true" />
+    <param key="device.ssm.measures" value="TTC DRAC PET" />
+    <param key="device.ssm.thresholds" value="4.0 3.4 2.0" />
+    <param key="device.ssm.range" value="100.0" />
+    <param key="device.ssm.file" value="ssm_output.xml" />
+  </vType>
+
+  <!-- Route: -636924784#1 (453m) through junction 10203729629, continues onto -636924784#0 (1617m) -->
+  <route id="convoy_route" edges="-636924784#1 -636924784#0" />
+
+  <!-- Intersection Stop Scenario: 4 vehicles approach junction 10203729629.
+       V004 (lead) emergency brakes at the intersection (hazard_step=85).
+       V003/V002 stop behind via CF. V001 (ego) brakes via RL model + V2V mesh relay.
+       Mesh path: V004 > V003 > V002 > V001 (up to 3 hops, use max_relay_hops=5). -->
+
+  <!-- V004: Lead — brakes at intersection -->
+  <vehicle id="V004" type="car" depart="0" route="convoy_route"
+           departSpeed="10.000" departPos="230.000" color="1,0.5,0" />
+  <!-- V003: relays V004's braking signal -->
+  <vehicle id="V003" type="car" depart="0" route="convoy_route"
+           departSpeed="10.000" departPos="200.000" color="1,0,0" />
+  <!-- V002: relays V003+V004 braking to ego -->
+  <vehicle id="V002" type="car" depart="0" route="convoy_route"
+           departSpeed="10.000" departPos="170.000" color="0,1,0" />
+  <!-- V001: Ego — catches up and brakes via RL model + V2V -->
+  <vehicle id="V001" type="car" depart="0" route="convoy_route"
+           departSpeed="10.000" departPos="100.000" color="0,0,1" />
+</routes>

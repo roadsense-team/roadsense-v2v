@@ -58,6 +58,56 @@ def _decel_bar(action_val: float, width: int = 10) -> str:
     return f"[{bar}] {decel:4.1f}"
 
 
+def _mesh_chain_for_source(mesh_trace, source_id, ego_id="V001"):
+    """Return the unique source-to-ego forwarding chain for one source."""
+    if not mesh_trace or not source_id:
+        return []
+
+    candidates = [event for event in mesh_trace if event.get("source_id") == source_id]
+    if not candidates:
+        return []
+
+    def _priority(event):
+        return (
+            int(event.get("age_ms", 1_000_000)),
+            int(event.get("hop_count", 1_000_000)),
+        )
+
+    end_events = [event for event in candidates if event.get("receiver_id") == ego_id]
+    if not end_events:
+        return []
+
+    chain = []
+    current = min(end_events, key=_priority)
+    chain.append(current)
+
+    while current.get("sender_id") != source_id:
+        prev_hop = int(current.get("hop_count", 0)) - 1
+        prev_receiver = current.get("sender_id")
+        prev_candidates = [
+            event
+            for event in candidates
+            if event.get("receiver_id") == prev_receiver
+            and int(event.get("hop_count", -1)) == prev_hop
+        ]
+        if not prev_candidates:
+            break
+        current = min(prev_candidates, key=_priority)
+        chain.append(current)
+
+    chain.reverse()
+
+    seen = set()
+    unique_chain = []
+    for event in chain:
+        edge = (event.get("sender_id"), event.get("receiver_id"))
+        if edge in seen:
+            continue
+        seen.add(edge)
+        unique_chain.append(edge)
+    return unique_chain
+
+
 def _load_model(model_path: str):
     """Load a trained PPO model. Returns (model, True) or (None, False)."""
     if not model_path:
@@ -81,15 +131,25 @@ def run_demo(
     cone_half_angle_deg: float = 45.0,
     hazard_step: int = None,
     max_relay_hops: int = 3,
+    sumo_cfg: str = None,
 ):
     """Run the visualization demo."""
     from envs.convoy_env import ConvoyEnv
 
     # Find scenario config
-    sumo_cfg = os.path.join(SCRIPT_DIR, "scenarios", scenario, "scenario.sumocfg")
+    if sumo_cfg is not None:
+        sumo_cfg = os.path.abspath(sumo_cfg)
+        scenario_label = os.path.basename(os.path.dirname(sumo_cfg))
+    else:
+        sumo_cfg = os.path.join(SCRIPT_DIR, "scenarios", scenario, "scenario.sumocfg")
+        scenario_label = scenario
+        if not os.path.exists(sumo_cfg):
+            print(f"ERROR: Scenario not found: {sumo_cfg}")
+            print(f"Available scenarios: {', '.join(list_scenarios())}")
+            sys.exit(1)
+
     if not os.path.exists(sumo_cfg):
-        print(f"ERROR: Scenario not found: {sumo_cfg}")
-        print(f"Available scenarios: {', '.join(list_scenarios())}")
+        print(f"ERROR: SUMO config not found: {sumo_cfg}")
         sys.exit(1)
 
     # Prefer measured emulator params (convoy-calibrated)
@@ -107,7 +167,7 @@ def run_demo(
     print("=" * 70)
     print("ConvoyEnv GUI Demo — RoadSense V2V PoC")
     print("=" * 70)
-    print(f"  Scenario:         {scenario}")
+    print(f"  Scenario:         {scenario_label}")
     print(f"  SUMO Config:      {sumo_cfg}")
     print(f"  Emulator:         {emulator_params or 'default'}")
     print(f"  Agent:            {'PPO Model (' + os.path.basename(model_path) + ')' if using_model else 'RANDOM (no model loaded)'}")
@@ -215,6 +275,25 @@ def run_demo(
                     events.append("[COLLISION]")
                 event_str = " ".join(events)
 
+                # Mesh relay proof: show hop counts for received V2V messages
+                mesh_rx = getattr(env, "_last_mesh_received", [])
+                mesh_trace = getattr(env, "_last_mesh_trace", [])
+                if mesh_rx and (step % 10 == 0 or info.get("hazard_injected")):
+                    mesh_str = ", ".join(f"{src}(hop={hc})" for src, hc in mesh_rx)
+                    print(f"       MESH RX: [{mesh_str}]")
+                if mesh_trace and (step % 10 == 0 or info.get("hazard_injected")):
+                    chain_edges = _mesh_chain_for_source(
+                        mesh_trace,
+                        source_id=hazard_vehicle,
+                        ego_id=env.EGO_VEHICLE_ID,
+                    )
+                    if chain_edges:
+                        trace_str = ", ".join(
+                            f"{sender}->{receiver}"
+                            for sender, receiver in chain_edges
+                        )
+                        print(f"       MESH TRACE: [{trace_str}]")
+
                 # Ego speed from observation (first 6 dims = current frame)
                 ego_speed = obs["ego"][0] * 30.0
 
@@ -256,6 +335,12 @@ def main():
         "--scenario", "-s",
         default="demo_poc",
         help="Scenario to run (default: demo_poc)",
+    )
+    parser.add_argument(
+        "--sumo_cfg",
+        type=str,
+        default=None,
+        help="Path to scenario.sumocfg (overrides --scenario)",
     )
     parser.add_argument(
         "--delay", "-d",
@@ -336,6 +421,7 @@ def main():
         cone_half_angle_deg=args.cone_half_angle,
         hazard_step=args.hazard_step,
         max_relay_hops=args.max_relay_hops,
+        sumo_cfg=args.sumo_cfg,
     )
 
 

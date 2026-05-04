@@ -544,6 +544,12 @@ class ConvoyEnv(gym.Env):
             current_time_ms=current_time_ms,
             cone_half_angle_deg=self.cone_half_angle_deg,
         )
+        # Expose for demo/debug: list of (source_id, hop_count) received by ego
+        self._last_mesh_received = [
+            (r.message.source_id or r.message.vehicle_id, r.message.hop_count)
+            for r in received_map.values()
+        ]
+        self._last_mesh_trace = list(getattr(self.emulator, "last_mesh_trace", []))
 
         meters_per_deg = ESPNOWEmulator.METERS_PER_DEG_LAT
         peer_observations = []

@@ -246,6 +246,7 @@ class ESPNOWEmulator:
         self.pending_messages: PriorityQueue = PriorityQueue()  # Messages awaiting delivery
         self.last_received: Dict[str, ReceivedMessage] = {}  # Actually delivered messages
         self.last_loss_state: Dict[str, bool] = {}  # Track burst loss per vehicle
+        self.last_mesh_trace: List[Dict[str, Any]] = []  # Debug: per-link mesh forwarding events
         self.current_time_ms = 0
         self.msg_counter = 0  # Monotonic counter to break ties in PriorityQueue
 
@@ -518,6 +519,7 @@ class ESPNOWEmulator:
         self.pending_messages = PriorityQueue()
         self.last_received = {}
         self.last_loss_state = {}
+        self.last_mesh_trace = []
         self.current_time_ms = 0
         self.msg_counter = 0
 
@@ -947,6 +949,7 @@ class ESPNOWEmulator:
         vehicle_ids = list(vehicle_states.keys())
         max_relay_hops = self._mesh_max_relay_hops()
         known_by_vehicle: Dict[str, Dict[Tuple[str, int], ReceivedMessage]] = {}
+        mesh_trace: List[Dict[str, Any]] = []
 
         for vehicle_id, state in vehicle_states.items():
             own_msg = self._build_message_from_state(state, timestamp_ms=current_time_ms)
@@ -1022,6 +1025,17 @@ class ESPNOWEmulator:
                         if delivered is None:
                             continue
 
+                        mesh_trace.append(
+                            {
+                                "sender_id": sender_id,
+                                "receiver_id": receiver_id,
+                                "source_id": source_id,
+                                "hop_count": int(delivered.message.hop_count),
+                                "age_ms": int(delivered.age_ms),
+                                "is_relay": bool(source_id != sender_id),
+                            }
+                        )
+
                         msg_key = self._message_key(delivered.message)
                         existing = known_by_vehicle[receiver_id].get(msg_key)
                         merged = self._merge_prefer_freshest(existing, delivered)
@@ -1043,6 +1057,7 @@ class ESPNOWEmulator:
             if existing is None or merged != existing:
                 ego_visible[source_id] = merged
 
+        self.last_mesh_trace = mesh_trace
         return ego_visible
 
     def _check_burst_loss(self, vehicle_id: str) -> bool:

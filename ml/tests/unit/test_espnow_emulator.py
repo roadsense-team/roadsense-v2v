@@ -141,6 +141,36 @@ def test_mesh_relay_adds_latency_per_hop():
     assert received["V003"].age_ms == 14
 
 
+def test_mesh_trace_records_forwarding_chain():
+    emulator = _make_emulator(max_range_m=100.0, base_latency_ms=7)
+    states = {
+        "V001": _State("V001", 0.0, 0.0),
+        "V002": _State("V002", 0.0, 60.0),
+        "V003": _State("V003", 0.0, 120.0),
+    }
+
+    emulator.simulate_mesh_step(states, ego_id="V001", current_time_ms=1000)
+
+    assert {"sender_id": "V003", "receiver_id": "V002", "source_id": "V003", "hop_count": 0} in [
+        {
+            "sender_id": event["sender_id"],
+            "receiver_id": event["receiver_id"],
+            "source_id": event["source_id"],
+            "hop_count": event["hop_count"],
+        }
+        for event in emulator.last_mesh_trace
+    ]
+    assert {"sender_id": "V002", "receiver_id": "V001", "source_id": "V003", "hop_count": 1} in [
+        {
+            "sender_id": event["sender_id"],
+            "receiver_id": event["receiver_id"],
+            "source_id": event["source_id"],
+            "hop_count": event["hop_count"],
+        }
+        for event in emulator.last_mesh_trace
+    ]
+
+
 def test_mesh_three_vehicle_convoy_ego_gets_both_peers():
     emulator = _make_emulator(max_range_m=100.0)
     states = {
