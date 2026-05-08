@@ -58,7 +58,7 @@ public:
     static constexpr float kMaxDistance       = 100.0f;
     static constexpr float kStalenessThreshMs = 500.0f;
     static constexpr float kConeHalfAngleDeg  = 45.0f;
-    static constexpr float kBrakingThreshold  = -2.5f;   // m/s²
+    static constexpr float kBrakingThreshold  = -4.0f;   // m/s² — accel_y (longitudinal) baseline ~-3.2 at rest
     static constexpr float kBrakingDecay      = 0.95f;   // per 10 Hz step
 
     ObservationBuilder() { reset(); }
@@ -90,6 +90,20 @@ public:
     /** Pointer to peer_mask tensor [kMaxPeers = 8]. */
     const float* peerMask() const { return peer_mask_out_; }
 
+    // --- Diagnostic getters (valid after each update() call) ---
+    /** Number of valid (cone-filtered, non-stale) peers seen this step. */
+    int   activePeerCount()   const { return last_active_peers_; }
+    /** True if any peer's longAccel crossed kBrakingThreshold this step. */
+    bool  isBrakingPeer()     const { return last_braking_peer_; }
+    /** Current braking decay value [0..1] — 1.0 = fresh brake, decays at 0.95/step. */
+    float brakingDecay()      const { return braking_decay_; }
+    /** Maximum closing speed (ego - peer) across valid peers this step, m/s. */
+    float maxClosingSpeed()   const { return last_max_closing_spd_; }
+    /** Distance to nearest valid peer in ego frame, metres (0 if no peers). */
+    float nearestPeerM()      const { return last_nearest_m_; }
+    /** Minimum longAccel across valid peers this step (most negative = hardest brake). */
+    float minPeerAccel()      const { return last_min_peer_accel_; }
+
 private:
     float ego_out_[kEgoDim];                          // [18]
     float peers_out_[kMaxPeers][kPeerFeatureDim];     // [8][6]
@@ -102,6 +116,13 @@ private:
 
     float braking_decay_ = 0.0f;
     float last_heading_  = 0.0f;  // cached when GPS speed too low
+
+    // Diagnostic state — updated at end of each update() call
+    int   last_active_peers_    = 0;
+    bool  last_braking_peer_    = false;
+    float last_max_closing_spd_ = 0.0f;
+    float last_nearest_m_       = 0.0f;
+    float last_min_peer_accel_  = 0.0f;
 
     /**
      * Push a new single-frame ego vector and advance the ring buffer.

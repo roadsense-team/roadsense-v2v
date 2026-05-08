@@ -18,7 +18,6 @@ import numpy as np
 METERS_PER_DEG_LAT = 111_000.0
 STEP_MS = 100  # 10 Hz
 STALENESS_THRESHOLD_MS = 500.0
-SELF_RX_VEHICLE_ID = "V001"
 
 
 @dataclass
@@ -71,10 +70,12 @@ class ReplayTrajectory:
         tx_path: str,
         rx_path: str,
         forward_axis: str = "y",
+        ego_vehicle_id: Optional[str] = None,
     ):
         self.tx_path = Path(tx_path)
         self.rx_path = Path(rx_path)
         self.forward_axis = forward_axis
+        self._ego_vehicle_id = ego_vehicle_id  # None = auto-detect from TX
         self._snapshots: Optional[List[TrajectorySnapshot]] = None
 
     def load(self) -> List[TrajectorySnapshot]:
@@ -84,19 +85,27 @@ class ReplayTrajectory:
 
         accel_col = "accel_y" if self.forward_axis == "y" else "accel_x"
 
-        # Parse TX (ego)
+        # Parse TX (ego) — only hop_count=0 rows are the device's own broadcasts.
+        # Relayed rows (hop_count>0) appear in TX files when the device also acts
+        # as a mesh relay; they must not be used as ego state.
         tx_by_time: Dict[int, dict] = {}
+        ego_vid: Optional[str] = self._ego_vehicle_id
         with open(self.tx_path, newline="") as f:
             for r in csv.DictReader(f):
+                if r.get("hop_count", "0").strip() != "0":
+                    continue
                 t = int(r["timestamp_local_ms"])
                 tx_by_time[t] = r
+                if ego_vid is None:
+                    ego_vid = r.get("vehicle_id", "").strip() or None
 
-        # Parse RX (peers), grouped by time
+        # Parse RX (peers), grouped by time.
+        # Exclude the ego's own messages echoed back via the mesh.
         rx_by_time: Dict[int, List[dict]] = {}
         with open(self.rx_path, newline="") as f:
             for r in csv.DictReader(f):
                 vid = r.get("from_vehicle_id", r.get("vehicle_id", "")).strip()
-                if vid == SELF_RX_VEHICLE_ID:
+                if ego_vid and vid == ego_vid:
                     continue
                 t = int(r["timestamp_local_ms"])
                 rx_by_time.setdefault(t, []).append(r)
@@ -173,8 +182,6 @@ class ReplayTrajectory:
                 continue
             for r in rx_by_time.get(rx_t, []):
                 vid = r.get("from_vehicle_id", r.get("vehicle_id", "")).strip()
-                if vid == SELF_RX_VEHICLE_ID:
-                    continue
                 prev = freshest.get(vid)
                 if prev is None or rx_t > prev[1]:
                     freshest[vid] = (r, rx_t)

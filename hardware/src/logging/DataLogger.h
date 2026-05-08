@@ -21,7 +21,8 @@
  * -------------------------------------------------
  * TX Log: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,
  *         accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z,
- *         hop_count,source_mac
+ *         hop_count,source_mac,risk_level,confidence,
+ *         active_peers,braking_peer,braking_decay,max_closing_ms,nearest_m
  * RX Log: timestamp_local_ms,msg_timestamp,from_vehicle_id,lat,lon,speed,heading,
  *         accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z,
  *         hop_count,source_mac
@@ -50,6 +51,18 @@
 enum LogMode {
     MODE_NETWORK_CHARACTERIZATION,  // Mode 1: Log TX/RX for ESP-NOW emulator (PRIMARY - do this first!)
     MODE_TRAINING_DATA             // Mode 2: Log ego-perspective for ML validation (FUTURE)
+};
+
+/**
+ * @brief ML diagnostic snapshot logged alongside each TX message.
+ * All fields default to zero, so relay rows (hop>0) are filled with zeros.
+ */
+struct MlDiag {
+    int   active_peers   = 0;
+    bool  braking_peer   = false;
+    float braking_decay  = 0.0f;
+    float max_closing_ms = 0.0f;
+    float nearest_m      = 0.0f;
 };
 
 class DataLogger {
@@ -97,12 +110,15 @@ public:
 
     /**
      * @brief Log a transmitted V2V message (Mode 1)
-     * @param msg Message that was just sent via ESP-NOW
+     * @param msg  Message that was just sent via ESP-NOW
+     * @param ml   ML diagnostics snapshot (defaults to zeros for relay rows)
      *
      * Call this AFTER sending message via ESP-NOW.
-     * Logs: local_timestamp, msg.timestamp, msg.vehicleId, position, speed
+     * Logs: local_timestamp, msg.timestamp, msg.vehicleId, position, speed,
+     *       plus ML columns: active_peers, braking_peer, braking_decay,
+     *                        max_closing_ms, nearest_m
      */
-    void logTxMessage(const V2VMessage& msg);
+    void logTxMessage(const V2VMessage& msg, const MlDiag& ml = MlDiag{});
 
     /**
      * @brief Queue a received V2V message for logging (Mode 1) - ISR SAFE
@@ -136,7 +152,8 @@ public:
      * @return Number of characters written (excluding null terminator)
      */
     static size_t formatCharacterizationTxRow(char* outBuffer, size_t bufferSize,
-                                              uint32_t localTimestampMs, const V2VMessage& msg);
+                                              uint32_t localTimestampMs, const V2VMessage& msg,
+                                              const MlDiag& ml = MlDiag{});
 
     /**
      * @brief Format Mode 1 RX row into caller-provided buffer

@@ -27,6 +27,7 @@ Usage (from inside Docker):
 """
 
 import argparse
+import numpy as np
 import os
 import sys
 import time
@@ -70,17 +71,60 @@ def _load_model(model_path: str):
     return model, True
 
 
+class _TFLitePolicy:
+    """Minimal TFLite policy wrapper to run inference on ConvoyEnv observations."""
+    def __init__(self, tflite_path: str):
+        import numpy as np
+        import tensorflow as tf
+
+        with open(tflite_path, "rb") as f:
+            content = f.read()
+        # Reference kernels to avoid delegate quirks
+        self._interp = tf.lite.Interpreter(
+            model_content=content,
+            experimental_op_resolver_type=tf.lite.experimental.OpResolverType.BUILTIN_REF,
+            experimental_delegates=[],
+        )
+        self._interp.allocate_tensors()
+        self._np = np
+
+        # Index inputs by shape
+        self._inps = self._interp.get_input_details()
+        self._outs = self._interp.get_output_details()
+        self._index = {}
+        for d in self._inps:
+            shape = tuple(d["shape"].tolist())
+            if shape == (1, 18):
+                self._index["ego"] = d["index"]
+            elif shape == (1, 8, 6):
+                self._index["peers"] = d["index"]
+            elif shape == (1, 8):
+                self._index["peer_mask"] = d["index"]
+        if set(self._index.keys()) != {"ego", "peers", "peer_mask"}:
+            raise RuntimeError(f"Unexpected TFLite input shapes: {[d['shape'].tolist() for d in self._inps]}")
+
+    def predict(self, obs: dict) -> float:
+        self._interp.set_tensor(self._index["ego"], obs["ego"][None, :].astype(self._np.float32))
+        self._interp.set_tensor(self._index["peers"], obs["peers"][None, :, :].astype(self._np.float32))
+        self._interp.set_tensor(self._index["peer_mask"], obs["peer_mask"][None, :].astype(self._np.float32))
+        self._interp.invoke()
+        val = float(self._interp.get_tensor(self._outs[0]["index"]).reshape(-1)[0])
+        return max(0.0, min(1.0, val))
+
+
 def run_demo(
     scenario: str,
     delay: float,
     episodes: int,
     seed: int,
     model_path: str = None,
+    tflite_model: str = None,
     ego_stack_frames: int = 1,
     hazard_vehicle: str = "V003",
     cone_half_angle_deg: float = 45.0,
     hazard_step: int = None,
     max_relay_hops: int = 3,
+    no_demo_override: bool = False,
 ):
     """Run the visualization demo."""
     from envs.convoy_env import ConvoyEnv
@@ -101,7 +145,19 @@ def run_demo(
         print("NOTE: Using default emulator params")
 
     # Load model
-    model, using_model = _load_model(model_path)
+    using_model = False
+    model = None
+    tfl = None
+    if tflite_model:
+        if not os.path.exists(tflite_model):
+            print(f"ERROR: TFLite model not found: {tflite_model}")
+            sys.exit(1)
+        tfl = _TFLitePolicy(tflite_model)
+        using_model = True
+        agent_label = f"TFLite ({os.path.basename(tflite_model)})"
+    else:
+        model, using_model = _load_model(model_path)
+        agent_label = f"PPO Model ({os.path.basename(model_path)})" if using_model else "RANDOM (no model loaded)"
 
     # Print header
     print("=" * 70)
@@ -110,7 +166,7 @@ def run_demo(
     print(f"  Scenario:         {scenario}")
     print(f"  SUMO Config:      {sumo_cfg}")
     print(f"  Emulator:         {emulator_params or 'default'}")
-    print(f"  Agent:            {'PPO Model (' + os.path.basename(model_path) + ')' if using_model else 'RANDOM (no model loaded)'}")
+    print(f"  Agent:            {agent_label}")
     print(f"  Ego Stack Frames: {ego_stack_frames}")
     print(f"  Step Delay:       {delay}s")
     print(f"  Episodes:         {episodes}")
@@ -137,15 +193,14 @@ def run_demo(
     # V003 brakes → V2V signal → V001 (ego) reacts before V002 even slows
     from envs.hazard_injector import HazardInjector
 
-    # DEMO OVERRIDE: force hazard vehicle to FULL emergency stop.
-    # At ~22 m/s cruise, need duration >= 2.2s at decel=10 to reach 0.
-    # Use 3.0s to guarantee full stop from any speed in the scenario.
-    HazardInjector.HAZARD_DECEL_MIN = 25.0   # ensures target_speed=0 even with short duration
-    HazardInjector.HAZARD_DECEL_MAX = 25.0
-    HazardInjector.BRAKING_DURATION_MIN = 1.0  # abrupt emergency stop (~20 m/s² actual)
-    HazardInjector.BRAKING_DURATION_MAX = 1.0
-    HazardInjector.HAZARD_RESOLVE_PROB = 0.0   # hazard vehicle stays stopped
-    HazardInjector.HAZARD_WINDOW_START = 50    # allow early injection for curve demo
+    if not no_demo_override:
+        # DEMO OVERRIDE: force hazard vehicle to FULL emergency stop for a clear demo.
+        HazardInjector.HAZARD_DECEL_MIN = 25.0
+        HazardInjector.HAZARD_DECEL_MAX = 25.0
+        HazardInjector.BRAKING_DURATION_MIN = 1.0
+        HazardInjector.BRAKING_DURATION_MAX = 1.0
+        HazardInjector.HAZARD_RESOLVE_PROB = 0.0
+        HazardInjector.HAZARD_WINDOW_START = 50
 
     print(f"DEBUG: hazard_vehicle={hazard_vehicle!r}, strategy={HazardInjector.TARGET_STRATEGY_FIXED_VEHICLE_ID}")
 
@@ -186,7 +241,12 @@ def run_demo(
 
             while not done:
                 if using_model:
-                    action, _ = model.predict(obs, deterministic=True)
+                    if tfl is not None:
+                        a = tfl.predict(obs)
+                        # Env expects a scalar action wrapped as array([val], dtype=float32)
+                        action = np.array([a], dtype=np.float32)
+                    else:
+                        action, _ = model.predict(obs, deterministic=True)
                 else:
                     action = env.action_space.sample()
 
@@ -282,6 +342,12 @@ def main():
         help="Path to trained PPO model (.zip). If not provided, uses random actions.",
     )
     parser.add_argument(
+        "--tflite_model",
+        type=str,
+        default=None,
+        help="Path to TFLite model (.tflite). Overrides --model_path if provided.",
+    )
+    parser.add_argument(
         "--ego_stack_frames",
         type=int,
         default=3,
@@ -312,6 +378,11 @@ def main():
         help="Max mesh relay hops (default: 3, use 5 for 6-vehicle curve scenario)",
     )
     parser.add_argument(
+        "--no_demo_override",
+        action="store_true",
+        help="Disable demo hazard overrides (use default HazardInjector settings)",
+    )
+    parser.add_argument(
         "--list", "-l",
         action="store_true",
         help="List available scenarios and exit",
@@ -331,11 +402,13 @@ def main():
         episodes=args.episodes,
         seed=args.seed,
         model_path=args.model_path,
+        tflite_model=args.tflite_model,
         ego_stack_frames=args.ego_stack_frames,
         hazard_vehicle=args.hazard_vehicle,
         cone_half_angle_deg=args.cone_half_angle,
         hazard_step=args.hazard_step,
         max_relay_hops=args.max_relay_hops,
+        no_demo_override=args.no_demo_override,
     )
 
 

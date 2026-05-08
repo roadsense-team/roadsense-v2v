@@ -54,7 +54,7 @@ class ReplayConvoyEnv(gym.Env):
 
     MAX_PEERS = 8
     COLLISION_DIST = 5.0
-    BRAKING_ACCEL_THRESHOLD = -2.5
+    BRAKING_ACCEL_THRESHOLD = -4.0  # accel_y (longitudinal) baseline ~-3.2 at rest
     BRAKING_DECAY = 0.95
     MAX_DECEL = 8.0
     DEFAULT_REWARD_CONFIG = {

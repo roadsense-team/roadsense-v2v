@@ -27,6 +27,11 @@ void ObservationBuilder::reset() {
     history_full_  = false;
     braking_decay_ = 0.0f;
     last_heading_  = 0.0f;
+    last_active_peers_    = 0;
+    last_braking_peer_    = false;
+    last_max_closing_spd_ = 0.0f;
+    last_nearest_m_       = 0.0f;
+    last_min_peer_accel_  = 0.0f;
 }
 
 void ObservationBuilder::update(const V2VMessage& ownMsg,
@@ -56,6 +61,7 @@ void ObservationBuilder::update(const V2VMessage& ownMsg,
     float min_peer_accel  = 0.0f;
     float max_closing_spd = 0.0f;
     bool any_braking_peer = false;
+    float nearest_m       = 1.0e9f;  // tracking nearest peer distance
 
     const auto& all_pkgs = pm.getAllPackages();
 
@@ -98,13 +104,17 @@ void ObservationBuilder::update(const V2VMessage& ownMsg,
         toEgoFrame(ego_heading, ego_lat, ego_lon, peer_lat, peer_lon, rel_x, rel_y);
 
         const float peer_speed  = peer.dynamics.speed;
-        const float peer_accel  = peer.dynamics.longAccel;
+        const float peer_accel  = peer.sensors.accel[1];  // always Y-axis regardless of peer firmware version
         const float peer_hdg    = peer.dynamics.heading;
 
         const float rel_speed   = peer_speed - ego_speed;
         float rel_heading       = peer_hdg - ego_heading;
         // Normalise to [-180, 180]
         rel_heading = std::fmod(rel_heading + 180.0f, 360.0f) - 180.0f;
+
+        // Track nearest peer distance
+        float dist = std::sqrt(rel_x * rel_x + rel_y * rel_y);
+        if (dist < nearest_m) nearest_m = dist;
 
         // Fill peer feature vector
         peers_out_[valid_count][0] = rel_x          / kMaxDistance;
@@ -134,6 +144,13 @@ void ObservationBuilder::update(const V2VMessage& ownMsg,
     } else {
         braking_decay_ *= kBrakingDecay;
     }
+
+    // Store diagnostics for external getters
+    last_active_peers_    = valid_count;
+    last_braking_peer_    = any_braking_peer;
+    last_max_closing_spd_ = max_closing_spd;
+    last_min_peer_accel_  = min_peer_accel;
+    last_nearest_m_       = (valid_count > 0) ? nearest_m : 0.0f;
 
     // ------------------------------------------------------------------ //
     // 4. Build single-frame ego vector                                    //

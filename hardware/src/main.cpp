@@ -183,10 +183,8 @@ V2VMessage buildV2VMessage() {
     msg.dynamics.heading = gpsData.heading;
     
     auto imuData = imu.read();
-    // Convert from IMU frame to vehicle frame if needed
-    // For now, assume sensor is mounted aligned with vehicle
-    msg.dynamics.longAccel = imuData.accel[0]; // X-axis = Longitudinal
-    msg.dynamics.latAccel = imuData.accel[1];  // Y-axis = Lateral
+    msg.dynamics.longAccel = imuData.accel[1]; // Y-axis = Longitudinal (forward)
+    msg.dynamics.latAccel  = imuData.accel[0]; // X-axis = Lateral
     
     // Raw Sensor Data (RoadSense Extension)
     memcpy(msg.sensors.accel, imuData.accel, sizeof(float) * 3);
@@ -440,7 +438,13 @@ void loop() {
 
         // Log transmitted message ONLY if send succeeded
         if (success && dataLogger.isLogging()) {
-            dataLogger.logTxMessage(msg);
+            MlDiag ml;
+            ml.active_peers   = g_obs.activePeerCount();
+            ml.braking_peer   = g_obs.isBrakingPeer();
+            ml.braking_decay  = g_obs.brakingDecay();
+            ml.max_closing_ms = g_obs.maxClosingSpeed();
+            ml.nearest_m      = g_obs.nearestPeerM();
+            dataLogger.logTxMessage(msg, ml);
         }
 
         if (lockPackageManager(pdMS_TO_TICKS(5))) {
@@ -488,7 +492,22 @@ void loop() {
 
         statusMsg += " | ML: " + String(g_lastAction, 3);
 
+        // ML diagnostic block — tells you definitively if the model is working
+        String mlDiag = "ML_DIAG: Peers=" + String(g_obs.activePeerCount());
+        if (g_obs.activePeerCount() > 0) {
+            mlDiag += " Near=" + String(g_obs.nearestPeerM(), 0) + "m";
+            mlDiag += " Close=" + String(g_obs.maxClosingSpeed(), 1) + "m/s";
+            mlDiag += " MinAccel=" + String(g_obs.minPeerAccel(), 2);
+        }
+        mlDiag += " | Brk=" + String(g_obs.isBrakingPeer() ? "YES" : "no");
+        mlDiag += " Decay=" + String(g_obs.brakingDecay(), 3);
+        mlDiag += " | Conf=" + String(g_lastAction, 3);
+        if (g_lastAction >= 0.7f)       mlDiag += " *** HIGH RISK ***";
+        else if (g_lastAction >= 0.4f)  mlDiag += " ** MED RISK **";
+        else if (g_lastAction >= 0.1f)  mlDiag += " * low risk";
+
         Logger::getInstance().info("STATUS", statusMsg);
+        Logger::getInstance().info("ML", mlDiag);
 
         lastPrintTime = now;
     }

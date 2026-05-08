@@ -128,8 +128,8 @@ IImuSensor::ImuData MPU6500Driver::read() {
     xyzFloat gyr = mpu.getGyrValues();       // deg/s (library output)
 
     // ✅ Convert to standard units (g → m/s², deg/s → rad/s)
-    data.accel[0] = gValue.x * 9.80665f;    // Forward axis
-    data.accel[1] = gValue.y * 9.80665f;    // Left axis
+    data.accel[0] = gValue.x * 9.80665f;    // Lateral axis
+    data.accel[1] = gValue.y * 9.80665f;    // Longitudinal axis (forward/backward)
     data.accel[2] = gValue.z * 9.80665f;    // Up axis
 
     data.gyro[0] = gyr.x * DEG_TO_RAD;      // Roll rate

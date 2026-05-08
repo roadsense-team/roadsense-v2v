@@ -22,7 +22,7 @@
  * - Vehicle 2: "V002"
  * - Vehicle 3: "V003"
  */
-#define VEHICLE_ID "V001"
+#define VEHICLE_ID "V003"
 
 // ============================================================================
 // HARDWARE PIN ASSIGNMENTS

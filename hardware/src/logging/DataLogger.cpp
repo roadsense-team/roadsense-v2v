@@ -357,7 +357,8 @@ void DataLogger::incrementSessionNumber() {
 // ============================================================================
 
 size_t DataLogger::formatCharacterizationTxRow(char* outBuffer, size_t bufferSize,
-                                               uint32_t localTimestampMs, const V2VMessage& msg) {
+                                               uint32_t localTimestampMs, const V2VMessage& msg,
+                                               const MlDiag& ml) {
     if (outBuffer == nullptr || bufferSize == 0) {
         return 0;
     }
@@ -366,7 +367,7 @@ size_t DataLogger::formatCharacterizationTxRow(char* outBuffer, size_t bufferSiz
     formatMacAddress(msg.sourceMAC, sourceMac, sizeof(sourceMac));
 
     int written = snprintf(outBuffer, bufferSize,
-        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f,%u,%s\n",
+        "%lu,%lu,%s,%.6f,%.6f,%.2f,%.1f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f,%u,%s,%u,%.3f,%d,%d,%.3f,%.2f,%.1f\n",
         static_cast<unsigned long>(localTimestampMs),
         static_cast<unsigned long>(msg.timestamp),
         msg.vehicleId,
@@ -384,7 +385,14 @@ size_t DataLogger::formatCharacterizationTxRow(char* outBuffer, size_t bufferSiz
         msg.sensors.mag[1],
         msg.sensors.mag[2],
         msg.hopCount,
-        sourceMac
+        sourceMac,
+        msg.alert.riskLevel,
+        msg.alert.confidence,
+        ml.active_peers,
+        ml.braking_peer ? 1 : 0,
+        ml.braking_decay,
+        ml.max_closing_ms,
+        ml.nearest_m
     );
 
     if (written < 0) {
@@ -487,17 +495,17 @@ bool DataLogger::startCharacterizationLogging(const char* vehicleId) {
 }
 
 // Log transmitted message (Mode 1)
-void DataLogger::logTxMessage(const V2VMessage& msg) {
+void DataLogger::logTxMessage(const V2VMessage& msg, const MlDiag& ml) {
     if (!m_isLogging || m_mode != MODE_NETWORK_CHARACTERIZATION) {
         return;
     }
 
     uint32_t local_time = millis();
 
-    // Format: timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,
-    //         accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z
-    char row[320];
-    size_t len = formatCharacterizationTxRow(row, sizeof(row), local_time, msg);
+    // Format: timestamp_local_ms,...,confidence,active_peers,braking_peer,
+    //         braking_decay,max_closing_ms,nearest_m
+    char row[400];
+    size_t len = formatCharacterizationTxRow(row, sizeof(row), local_time, msg, ml);
 
     // Write immediately (no buffering for characterization - need every sample!)
     size_t written = m_txLogFile.write(row, len);
@@ -625,7 +633,7 @@ bool DataLogger::createCharacterizationFiles(const char* vehicleId) {
 
 // Write TX log header
 bool DataLogger::writeTxHeader() {
-    const char* header = "timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z,hop_count,source_mac\n";
+    const char* header = "timestamp_local_ms,msg_timestamp,vehicle_id,lat,lon,speed,heading,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z,hop_count,source_mac,risk_level,confidence,active_peers,braking_peer,braking_decay,max_closing_ms,nearest_m\n";
     size_t len = strlen(header);
     size_t written = m_txLogFile.write(header, len);
 
